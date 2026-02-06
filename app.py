@@ -197,7 +197,6 @@
 
 # if __name__=="__main__":
 #     app.run(host="0.0.0.0", port=10000)
-
 from flask import Flask, render_template, request, jsonify
 import cv2
 import numpy as np
@@ -205,10 +204,8 @@ import base64
 
 app = Flask(__name__)
 
-# -------- OMR PAGE RATIO --------
 OMR_RATIO = 26 / 21
 
-# -------- ANSWER SHEET RATIOS (your values) --------
 X_RATIO = 0.005
 Y_RATIO = 0.57
 W_RATIO = 0.99
@@ -223,13 +220,17 @@ def index():
 @app.route("/process", methods=["POST"])
 def process():
 
-    # read image from mobile
+    if "image" not in request.files:
+        return jsonify({"error": "no image"}), 400
+
     file = request.files["image"].read()
-    img = cv2.imdecode(np.frombuffer(file, np.uint8), 1)
+    img = cv2.imdecode(np.frombuffer(file, np.uint8), cv2.IMREAD_COLOR)
+
+    if img is None:
+        return jsonify({"error": "decode failed"}), 400
 
     h, w, _ = img.shape
 
-    # -------- OMR bounding box (26:21) --------
     box_w = int(w * 0.7)
     box_h = int(box_w * OMR_RATIO)
 
@@ -240,9 +241,11 @@ def process():
     x2 = min(w, cx + box_w // 2)
     y2 = min(h, cy + box_h // 2)
 
+    if x2 <= x1 or y2 <= y1:
+        return jsonify({"error": "invalid omr crop"}), 400
+
     omr = img[y1:y2, x1:x2]
 
-    # -------- Answer sheet crop using ratios --------
     oh, ow, _ = omr.shape
 
     ax = int(ow * X_RATIO)
@@ -250,17 +253,21 @@ def process():
     aw = int(ow * W_RATIO)
     ah = int(oh * H_RATIO)
 
-    # ---- SAFE LIMITS (very important) ----
     ax = max(0, ax)
     ay = max(0, ay)
     aw = min(ow - ax, aw)
     ah = min(oh - ay, ah)
 
-    answer = omr[ay:ay + ah, ax:ax + aw]
+    if aw <= 0 or ah <= 0:
+        answer = omr.copy()
+    else:
+        answer = omr[ay:ay + ah, ax:ax + aw]
 
-    # encode both images
-    _, buf1 = cv2.imencode(".jpg", omr)
-    _, buf2 = cv2.imencode(".jpg", answer)
+    ok1, buf1 = cv2.imencode(".jpg", omr)
+    ok2, buf2 = cv2.imencode(".jpg", answer)
+
+    if not ok1 or not ok2:
+        return jsonify({"error": "encode failed"}), 400
 
     omr_b64 = base64.b64encode(buf1).decode()
     ans_b64 = base64.b64encode(buf2).decode()
@@ -273,6 +280,8 @@ def process():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
+
 
 
 
