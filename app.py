@@ -198,29 +198,32 @@
 # if __name__=="__main__":
 #     app.run(host="0.0.0.0", port=10000)
 
-
 from flask import Flask, render_template, request, jsonify
-import cv2, numpy as np
+import cv2
+import numpy as np
 import base64
 
 app = Flask(__name__)
 
-# OMR page ratio
-OMR_RATIO = 26/21
+# -------- OMR PAGE RATIO --------
+OMR_RATIO = 26 / 21
 
-# Answer sheet ratios (your values)
+# -------- ANSWER SHEET RATIOS (your values) --------
 X_RATIO = 0.005
 Y_RATIO = 0.57
 W_RATIO = 0.99
 H_RATIO = 0.22
 
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
 @app.route("/process", methods=["POST"])
 def process():
 
+    # read image from mobile
     file = request.files["image"].read()
     img = cv2.imdecode(np.frombuffer(file, np.uint8), 1)
 
@@ -232,10 +235,10 @@ def process():
 
     cx, cy = w // 2, h // 2
 
-    x1 = cx - box_w // 2
-    y1 = cy - box_h // 2
-    x2 = cx + box_w // 2
-    y2 = cy + box_h // 2
+    x1 = max(0, cx - box_w // 2)
+    y1 = max(0, cy - box_h // 2)
+    x2 = min(w, cx + box_w // 2)
+    y2 = min(h, cy + box_h // 2)
 
     omr = img[y1:y2, x1:x2]
 
@@ -247,9 +250,15 @@ def process():
     aw = int(ow * W_RATIO)
     ah = int(oh * H_RATIO)
 
-    answer = omr[ay:ay+ah, ax:ax+aw]
+    # ---- SAFE LIMITS (very important) ----
+    ax = max(0, ax)
+    ay = max(0, ay)
+    aw = min(ow - ax, aw)
+    ah = min(oh - ay, ah)
 
-    # Encode both images
+    answer = omr[ay:ay + ah, ax:ax + aw]
+
+    # encode both images
     _, buf1 = cv2.imencode(".jpg", omr)
     _, buf2 = cv2.imencode(".jpg", answer)
 
@@ -261,8 +270,11 @@ def process():
         "answer": ans_b64
     })
 
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
+
 
 
 
