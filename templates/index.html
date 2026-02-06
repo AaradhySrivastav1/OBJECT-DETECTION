@@ -1,51 +1,67 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-<title>Mobile OMR Scanner</title>
+<title>OMR Capture</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+#wrap{position:relative;width:300px}
+#box{
+ position:absolute;
+ border:3px solid lime;
+ top:15%;
+ left:15%;
+ width:70%;
+ height:70%;
+ pointer-events:none;
+}
+</style>
+
 </head>
 
 <body>
 
-<h3>Mobile OMR Capture</h3>
+<h3>Place OMR inside box</h3>
 
+<div id="wrap">
 <video id="video" autoplay playsinline width="300"></video>
-<br>
+<div id="box"></div>
+</div>
 
+<br>
 <button onclick="capture()">Capture</button>
 
-<canvas id="canvas" style="display:none;"></canvas>
+<canvas id="canvas" style="display:none"></canvas>
 
+<br><br>
 <img id="result" width="300"/>
 
 <script>
-const video = document.getElementById("video");
+const video=document.getElementById("video");
 
 navigator.mediaDevices.getUserMedia({video:true})
-.then(stream=>{
-    video.srcObject = stream;
-});
+.then(s=>video.srcObject=s);
 
 function capture(){
-    const canvas=document.getElementById("canvas");
-    canvas.width=video.videoWidth;
-    canvas.height=video.videoHeight;
-    canvas.getContext("2d").drawImage(video,0,0);
+ const c=document.getElementById("canvas");
+ c.width=video.videoWidth;
+ c.height=video.videoHeight;
+ c.getContext("2d").drawImage(video,0,0);
 
-    canvas.toBlob(blob=>{
-        let form=new FormData();
-        form.append("image",blob,"cam.jpg");
+ c.toBlob(b=>{
+   let f=new FormData();
+   f.append("image",b,"cam.jpg");
 
-        fetch("/process",{method:"POST",body:form})
-        .then(r=>r.blob())
-        .then(b=>{
-            document.getElementById("result").src=
-                URL.createObjectURL(b);
-        });
-    });
+   fetch("/process",{method:"POST",body:f})
+   .then(r=>r.blob())
+   .then(img=>{
+     document.getElementById("result").src=
+       URL.createObjectURL(img);
+   });
+ });
 }
 </script>
 
 </body>
 </html>
+
