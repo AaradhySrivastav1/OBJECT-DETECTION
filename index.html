@@ -1,0 +1,70 @@
+{% comment %} <html>
+<head>
+<title>Live OMR Cropper</title>
+</head>
+
+<body>
+<h2>Live OMR Capture (26 x 21)</h2>
+
+<img src="/video">
+
+<br><br>
+
+<form action="/capture">
+<button type="submit">Capture Answer Sheet</button>
+</form>
+
+</body>
+</html> {% endcomment %}
+
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Mobile OMR Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body>
+
+<h3>Mobile OMR Capture</h3>
+
+<video id="video" autoplay playsinline width="300"></video>
+<br>
+
+<button onclick="capture()">Capture</button>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<img id="result" width="300"/>
+
+<script>
+const video = document.getElementById("video");
+
+navigator.mediaDevices.getUserMedia({video:true})
+.then(stream=>{
+    video.srcObject = stream;
+});
+
+function capture(){
+    const canvas=document.getElementById("canvas");
+    canvas.width=video.videoWidth;
+    canvas.height=video.videoHeight;
+    canvas.getContext("2d").drawImage(video,0,0);
+
+    canvas.toBlob(blob=>{
+        let form=new FormData();
+        form.append("image",blob,"cam.jpg");
+
+        fetch("/process",{method:"POST",body:form})
+        .then(r=>r.blob())
+        .then(b=>{
+            document.getElementById("result").src=
+                URL.createObjectURL(b);
+        });
+    });
+}
+</script>
+
+</body>
+</html>
