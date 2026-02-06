@@ -97,6 +97,59 @@
 
 
 
+# from flask import Flask, render_template, request, send_file
+# import cv2, numpy as np
+# from io import BytesIO
+
+# app = Flask(__name__)
+
+# OMR_RATIO = 26/21
+# ANSWER_TOP = 0.30   # lower 70% = answer sheet
+
+# @app.route("/")
+# def index():
+#     return render_template("index.html")
+
+# @app.route("/process", methods=["POST"])
+# def process():
+
+#     file = request.files["image"].read()
+#     img = cv2.imdecode(np.frombuffer(file,np.uint8),1)
+
+#     h,w,_ = img.shape
+
+#     box_w = int(w*0.7)
+#     box_h = int(box_w*OMR_RATIO)
+
+#     cx,cy=w//2,h//2
+
+#     x1=cx-box_w//2
+#     y1=cy-box_h//2
+#     x2=cx+box_w//2
+#     y2=cy+box_h//2
+
+#     omr = img[y1:y2,x1:x2]
+
+#     gray=cv2.cvtColor(omr,cv2.COLOR_BGR2GRAY)
+#     thresh=cv2.threshold(gray,0,255,
+#         cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+
+#     hh,ww=thresh.shape
+#     y=int(hh*ANSWER_TOP)
+
+#     answer = thresh[y:hh,0:ww]
+
+#     answer=cv2.cvtColor(answer,cv2.COLOR_GRAY2BGR)
+
+#     ok,buf=cv2.imencode(".jpg",answer)
+
+#     return send_file(BytesIO(buf),
+#         mimetype="image/jpeg")
+
+# if __name__=="__main__":
+#     app.run(host="0.0.0.0",port=10000)
+
+
 from flask import Flask, render_template, request, send_file
 import cv2, numpy as np
 from io import BytesIO
@@ -104,7 +157,7 @@ from io import BytesIO
 app = Flask(__name__)
 
 OMR_RATIO = 26/21
-ANSWER_TOP = 0.30   # lower 70% = answer sheet
+ANSWER_TOP = 0.30   # bottom 70% = answer sheet
 
 @app.route("/")
 def index():
@@ -118,33 +171,31 @@ def process():
 
     h,w,_ = img.shape
 
+    # -------- OMR bounding box (26:21) --------
     box_w = int(w*0.7)
     box_h = int(box_w*OMR_RATIO)
 
-    cx,cy=w//2,h//2
+    cx,cy = w//2, h//2
 
-    x1=cx-box_w//2
-    y1=cy-box_h//2
-    x2=cx+box_w//2
-    y2=cy+box_h//2
+    x1 = cx-box_w//2
+    y1 = cy-box_h//2
+    x2 = cx+box_w//2
+    y2 = cy+box_h//2
 
-    omr = img[y1:y2,x1:x2]
+    omr = img[y1:y2, x1:x2]
 
-    gray=cv2.cvtColor(omr,cv2.COLOR_BGR2GRAY)
-    thresh=cv2.threshold(gray,0,255,
-        cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+    # -------- Answer sheet ratio crop --------
+    hh,ww,_ = omr.shape
+    y = int(hh * ANSWER_TOP)
 
-    hh,ww=thresh.shape
-    y=int(hh*ANSWER_TOP)
+    answer_sheet = omr[y:hh, 0:ww]
 
-    answer = thresh[y:hh,0:ww]
+    # encode and return only answer sheet
+    ok, buf = cv2.imencode(".jpg", answer_sheet)
 
-    answer=cv2.cvtColor(answer,cv2.COLOR_GRAY2BGR)
-
-    ok,buf=cv2.imencode(".jpg",answer)
-
-    return send_file(BytesIO(buf),
-        mimetype="image/jpeg")
+    return send_file(BytesIO(buf), mimetype="image/jpeg")
 
 if __name__=="__main__":
-    app.run(host="0.0.0.0",port=10000)
+    app.run(host="0.0.0.0", port=10000)
+
+
