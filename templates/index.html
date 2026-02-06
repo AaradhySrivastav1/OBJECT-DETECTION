@@ -39,7 +39,10 @@
 <script>
 const video=document.getElementById("video");
 
-navigator.mediaDevices.getUserMedia({video:true})
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { exact: "environment" } }
+})
+
 .then(s=>video.srcObject=s);
 
 function capture(){
