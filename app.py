@@ -150,14 +150,69 @@
 #     app.run(host="0.0.0.0",port=10000)
 
 
-from flask import Flask, render_template, request, send_file
+# from flask import Flask, render_template, request, send_file
+# import cv2, numpy as np
+# from io import BytesIO
+
+# app = Flask(__name__)
+
+# OMR_RATIO = 26/21
+# ANSWER_TOP = 0.30   # bottom 70% = answer sheet
+
+# @app.route("/")
+# def index():
+#     return render_template("index.html")
+
+# @app.route("/process", methods=["POST"])
+# def process():
+
+#     file = request.files["image"].read()
+#     img = cv2.imdecode(np.frombuffer(file,np.uint8),1)
+
+#     h,w,_ = img.shape
+
+#     # -------- OMR bounding box (26:21) --------
+#     box_w = int(w*0.7)
+#     box_h = int(box_w*OMR_RATIO)
+
+#     cx,cy = w//2, h//2
+
+#     x1 = cx-box_w//2
+#     y1 = cy-box_h//2
+#     x2 = cx+box_w//2
+#     y2 = cy+box_h//2
+
+#     omr = img[y1:y2, x1:x2]
+
+#     # -------- Answer sheet ratio crop --------
+#     hh,ww,_ = omr.shape
+#     y = int(hh * ANSWER_TOP)
+
+#     answer_sheet = omr[y:hh, 0:ww]
+
+#     # encode and return only answer sheet
+#     ok, buf = cv2.imencode(".jpg", answer_sheet)
+
+#     return send_file(BytesIO(buf), mimetype="image/jpeg")
+
+# if __name__=="__main__":
+#     app.run(host="0.0.0.0", port=10000)
+
+
+from flask import Flask, render_template, request, jsonify
 import cv2, numpy as np
-from io import BytesIO
+import base64
 
 app = Flask(__name__)
 
+# OMR page ratio
 OMR_RATIO = 26/21
-ANSWER_TOP = 0.30   # bottom 70% = answer sheet
+
+# Answer sheet ratios (your values)
+X_RATIO = 0.005
+Y_RATIO = 0.57
+W_RATIO = 0.99
+H_RATIO = 0.22
 
 @app.route("/")
 def index():
@@ -167,35 +222,48 @@ def index():
 def process():
 
     file = request.files["image"].read()
-    img = cv2.imdecode(np.frombuffer(file,np.uint8),1)
+    img = cv2.imdecode(np.frombuffer(file, np.uint8), 1)
 
-    h,w,_ = img.shape
+    h, w, _ = img.shape
 
     # -------- OMR bounding box (26:21) --------
-    box_w = int(w*0.7)
-    box_h = int(box_w*OMR_RATIO)
+    box_w = int(w * 0.7)
+    box_h = int(box_w * OMR_RATIO)
 
-    cx,cy = w//2, h//2
+    cx, cy = w // 2, h // 2
 
-    x1 = cx-box_w//2
-    y1 = cy-box_h//2
-    x2 = cx+box_w//2
-    y2 = cy+box_h//2
+    x1 = cx - box_w // 2
+    y1 = cy - box_h // 2
+    x2 = cx + box_w // 2
+    y2 = cy + box_h // 2
 
     omr = img[y1:y2, x1:x2]
 
-    # -------- Answer sheet ratio crop --------
-    hh,ww,_ = omr.shape
-    y = int(hh * ANSWER_TOP)
+    # -------- Answer sheet crop using ratios --------
+    oh, ow, _ = omr.shape
 
-    answer_sheet = omr[y:hh, 0:ww]
+    ax = int(ow * X_RATIO)
+    ay = int(oh * Y_RATIO)
+    aw = int(ow * W_RATIO)
+    ah = int(oh * H_RATIO)
 
-    # encode and return only answer sheet
-    ok, buf = cv2.imencode(".jpg", answer_sheet)
+    answer = omr[ay:ay+ah, ax:ax+aw]
 
-    return send_file(BytesIO(buf), mimetype="image/jpeg")
+    # Encode both images
+    _, buf1 = cv2.imencode(".jpg", omr)
+    _, buf2 = cv2.imencode(".jpg", answer)
 
-if __name__=="__main__":
+    omr_b64 = base64.b64encode(buf1).decode()
+    ans_b64 = base64.b64encode(buf2).decode()
+
+    return jsonify({
+        "omr": omr_b64,
+        "answer": ans_b64
+    })
+
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
+
 
 
