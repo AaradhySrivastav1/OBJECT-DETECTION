@@ -198,49 +198,63 @@
 # if __name__=="__main__":
 #     app.run(host="0.0.0.0", port=10000)from flask import Flask, render_template, request, send_file
 
-
 from flask import Flask, render_template, request, send_file
-import cv2
-import numpy as np
 import base64
 from io import BytesIO
 
+import cv2
+import numpy as np
+
 app = Flask(__name__)
 
-OMR_RATIO = 26/21
+OMR_RATIO = 26.5 / 21.5
+BOX_WIDTH_RATIO = 0.7
 X_RATIO = 0.005
 Y_RATIO = 0.57
 W_RATIO = 0.99
 H_RATIO = 0.22
 
+
+def _safe_center_box(frame_width: int, frame_height: int) -> tuple[int, int, int, int]:
+    max_width_by_height = int(frame_height / OMR_RATIO)
+    box_w = min(int(frame_width * BOX_WIDTH_RATIO), max_width_by_height)
+    box_h = int(box_w * OMR_RATIO)
+
+    x1 = max(0, min(frame_width - box_w, (frame_width - box_w) // 2))
+    y1 = max(0, min(frame_height - box_h, (frame_height - box_h) // 2))
+    x2 = x1 + box_w
+    y2 = y1 + box_h
+
+    return x1, y1, x2, y2
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/process")
+
+@app.route("/process", methods=["POST"])
 def process():
-    data = request.args.get("img")
+    payload = request.get_json(silent=True) or {}
+    data = payload.get("img") or request.form.get("img")
     if not data:
         return "no image", 400
 
-    header, encoded = data.split(",", 1)
-    img_bytes = base64.b64decode(encoded)
+    _, _, encoded = data.partition(",")
+    if not encoded:
+        return "invalid image data", 400
+
+    try:
+        img_bytes = base64.b64decode(encoded)
+    except (base64.binascii.Error, ValueError):
+        return "decode failed", 400
 
     img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return "decode failed", 400
 
     h, w, _ = img.shape
-
-    box_w = int(w * 0.7)
-    box_h = int(box_w * OMR_RATIO)
-
-    cx, cy = w // 2, h // 2
-    x1 = max(0, cx - box_w // 2)
-    y1 = max(0, cy - box_h // 2)
-    x2 = min(w, cx + box_w // 2)
-    y2 = min(h, cy + box_h // 2)
-
+    x1, y1, x2, y2 = _safe_center_box(w, h)
     omr = img[y1:y2, x1:x2]
 
     oh, ow, _ = omr.shape
@@ -251,10 +265,10 @@ def process():
 
     ax = max(0, ax)
     ay = max(0, ay)
-    aw = min(ow - ax, aw)
-    ah = min(oh - ay, ah)
+    aw = max(1, min(ow - ax, aw))
+    ah = max(1, min(oh - ay, ah))
 
-    answer = omr[ay:ay+ah, ax:ax+aw]
+    answer = omr[ay : ay + ah, ax : ax + aw]
 
     ok, buf = cv2.imencode(".jpg", answer)
     if not ok:
@@ -262,8 +276,10 @@ def process():
 
     return send_file(BytesIO(buf), mimetype="image/jpeg")
 
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
