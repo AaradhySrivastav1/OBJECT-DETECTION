@@ -37,52 +37,47 @@
 <img id="result" width="300"/>
 
 <script>
-const video=document.getElementById("video");
+const video = document.getElementById("video");
 
 navigator.mediaDevices.getUserMedia({
-  video:{facingMode:{exact:"environment"}}
-}).then(s=>video.srcObject=s)
-.catch(()=>{
- navigator.mediaDevices.getUserMedia({video:true})
- .then(s=>video.srcObject=s);
+  video: { facingMode: { exact: "environment" } }
+}).then(s => video.srcObject = s)
+.catch(() => {
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(s => video.srcObject = s);
 });
 
 function capture(){
- const c=document.getElementById("canvas");
+  const c = document.getElementById("canvas");
 
- // 🔴 LIMIT resolution (VERY IMPORTANT)
- const MAX_W = 1024;
+  const MAX_W = 640;
+  let vw = video.videoWidth;
+  let vh = video.videoHeight;
+  let scale = Math.min(1, MAX_W / vw);
 
- let vw = video.videoWidth;
- let vh = video.videoHeight;
+  c.width = vw * scale;
+  c.height = vh * scale;
 
- let scale = Math.min(1, MAX_W / vw);
+  c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
 
- c.width = vw * scale;
- c.height = vh * scale;
+  const data = c.toDataURL("image/jpeg", 0.6);
 
- c.getContext("2d").drawImage(video,0,0,c.width,c.height);
-
- c.toBlob(b=>{
-   let f=new FormData();
-   f.append("image",b,"cam.jpg");
-
-   fetch("/process",{method:"POST",body:f})
-.then(r=>{
-  if(!r.ok) throw new Error("server error");
-  return r.blob();
-})
-.then(b=>{
-  document.getElementById("answer").src =
-    URL.createObjectURL(b);
-})
-.catch(e=>{
-  alert("Capture failed. Try again.");
-  console.error(e);
-});
- },"image/jpeg",0.6); // 🔴 compression
+  fetch("/process?img=" + encodeURIComponent(data))
+    .then(r => {
+      if(!r.ok) throw new Error("server error");
+      return r.blob();
+    })
+    .then(b => {
+      document.getElementById("answer").src =
+        URL.createObjectURL(b);
+    })
+    .catch(e => {
+      alert("Capture failed. Try again.");
+      console.error(e);
+    });
 }
 </script>
+
 
 
 </body>
