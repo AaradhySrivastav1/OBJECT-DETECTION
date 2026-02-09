@@ -6,6 +6,7 @@
 
 <style>
 #wrap{position:relative;width:300px}
+ #video{width:300px;display:block}
 #box{
  position:absolute;
  border:3px solid lime;
@@ -24,7 +25,7 @@
 <h3>Place OMR inside box</h3>
 
 <div id="wrap">
-<video id="video" autoplay playsinline width="300"></video>
+<video id="video" autoplay playsinline></video>
 <div id="box"></div>
 </div>
 
@@ -37,7 +38,14 @@
 <img id="result" width="300"/>
 
 <script>
-const video = document.getElementById("video");
+// const video = document.getElementById("video");
+ const video = document.getElementById("video");
+const wrap = document.getElementById("wrap");
+const box = document.getElementById("box");
+
+const OMR_RATIO = 26.5 / 21.5;
+const BOX_WIDTH_RATIO = 0.7;
+
 
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: { exact: "environment" } }
@@ -46,6 +54,21 @@ navigator.mediaDevices.getUserMedia({
   navigator.mediaDevices.getUserMedia({ video: true })
     .then(s => video.srcObject = s);
 });
+ video.addEventListener("loadedmetadata", () => {
+  const displayWidth = video.clientWidth;
+  const displayHeight = video.clientHeight;
+  wrap.style.height = `${displayHeight}px`;
+
+  const maxWidthByHeight = displayHeight / OMR_RATIO;
+  const boxWidth = Math.min(displayWidth * BOX_WIDTH_RATIO, maxWidthByHeight);
+  const boxHeight = boxWidth * OMR_RATIO;
+
+  box.style.width = `${boxWidth}px`;
+  box.style.height = `${boxHeight}px`;
+  box.style.left = `${(displayWidth - boxWidth) / 2}px`;
+  box.style.top = `${(displayHeight - boxHeight) / 2}px`;
+});
+
 
 function capture(){
   const c = document.getElementById("canvas");
@@ -62,13 +85,17 @@ function capture(){
 
   const data = c.toDataURL("image/jpeg", 0.6);
 
-  fetch("/process?img=" + encodeURIComponent(data))
+  fetch("/process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img: data })
+  })
     .then(r => {
       if(!r.ok) throw new Error("server error");
       return r.blob();
     })
     .then(b => {
-      document.getElementById("answer").src =
+      document.getElementById("result").src =
         URL.createObjectURL(b);
     })
     .catch(e => {
