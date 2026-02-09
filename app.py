@@ -197,10 +197,10 @@
 
 # if __name__=="__main__":
 #     app.run(host="0.0.0.0", port=10000)
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, send_file
 import cv2
 import numpy as np
-import base64
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -221,16 +221,17 @@ def index():
 def process():
 
     if "image" not in request.files:
-        return jsonify({"error": "no image"}), 400
+        return "no image", 400
 
     file = request.files["image"].read()
     img = cv2.imdecode(np.frombuffer(file, np.uint8), cv2.IMREAD_COLOR)
 
     if img is None:
-        return jsonify({"error": "decode failed"}), 400
+        return "decode failed", 400
 
     h, w, _ = img.shape
 
+    # --- OMR box ---
     box_w = int(w * 0.7)
     box_h = int(box_w * OMR_RATIO)
 
@@ -241,13 +242,11 @@ def process():
     x2 = min(w, cx + box_w // 2)
     y2 = min(h, cy + box_h // 2)
 
-    if x2 <= x1 or y2 <= y1:
-        return jsonify({"error": "invalid omr crop"}), 400
-
     omr = img[y1:y2, x1:x2]
 
     oh, ow, _ = omr.shape
 
+    # --- Answer block ---
     ax = int(ow * X_RATIO)
     ay = int(oh * Y_RATIO)
     aw = int(ow * W_RATIO)
@@ -258,31 +257,21 @@ def process():
     aw = min(ow - ax, aw)
     ah = min(oh - ay, ah)
 
-    if aw <= 0 or ah <= 0:
-        answer = omr.copy()
-    else:
-        answer = omr[ay:ay + ah, ax:ax + aw]
+    answer = omr[ay:ay+ah, ax:ax+aw]
 
-    ok1, buf1 = cv2.imencode(".jpg", omr)
-    ok2, buf2 = cv2.imencode(".jpg", answer)
+    ok, buf = cv2.imencode(".jpg", answer)
+    if not ok:
+        return "encode failed", 400
 
-    if not ok1 or not ok2:
-        return jsonify({"error": "encode failed"}), 400
-
-    omr_b64 = base64.b64encode(buf1).decode()
-    ans_b64 = base64.b64encode(buf2).decode()
-
-    return jsonify({
-        "omr": omr_b64,
-        "answer": ans_b64
-    })
+    return send_file(
+        BytesIO(buf),
+        mimetype="image/jpeg",
+        as_attachment=False
+    )
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
-
 
 
 
