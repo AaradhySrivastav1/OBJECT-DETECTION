@@ -196,47 +196,43 @@
 #     return send_file(BytesIO(buf), mimetype="image/jpeg")
 
 # if __name__=="__main__":
-#     app.run(host="0.0.0.0", port=10000)
-from flask import Flask, render_template, request, send_file
+#     app.run(host="0.0.0.0", port=10000)from flask import Flask, render_template, request, send_file
 import cv2
 import numpy as np
+import base64
 from io import BytesIO
 
 app = Flask(__name__)
 
-OMR_RATIO = 26 / 21
-
+OMR_RATIO = 26/21
 X_RATIO = 0.005
 Y_RATIO = 0.57
 W_RATIO = 0.99
 H_RATIO = 0.22
 
-
 @app.route("/")
 def index():
     return render_template("index.html")
 
-
-@app.route("/process", methods=["POST"])
+@app.route("/process")
 def process():
-
-    if "image" not in request.files:
+    data = request.args.get("img")
+    if not data:
         return "no image", 400
 
-    file = request.files["image"].read()
-    img = cv2.imdecode(np.frombuffer(file, np.uint8), cv2.IMREAD_COLOR)
+    header, encoded = data.split(",", 1)
+    img_bytes = base64.b64decode(encoded)
 
+    img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return "decode failed", 400
 
     h, w, _ = img.shape
 
-    # --- OMR box ---
     box_w = int(w * 0.7)
     box_h = int(box_w * OMR_RATIO)
 
     cx, cy = w // 2, h // 2
-
     x1 = max(0, cx - box_w // 2)
     y1 = max(0, cy - box_h // 2)
     x2 = min(w, cx + box_w // 2)
@@ -245,8 +241,6 @@ def process():
     omr = img[y1:y2, x1:x2]
 
     oh, ow, _ = omr.shape
-
-    # --- Answer block ---
     ax = int(ow * X_RATIO)
     ay = int(oh * Y_RATIO)
     aw = int(ow * W_RATIO)
@@ -263,15 +257,11 @@ def process():
     if not ok:
         return "encode failed", 400
 
-    return send_file(
-        BytesIO(buf),
-        mimetype="image/jpeg",
-        as_attachment=False
-    )
-
+    return send_file(BytesIO(buf), mimetype="image/jpeg")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
