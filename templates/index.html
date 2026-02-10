@@ -51,7 +51,7 @@ const box = document.getElementById("box");
 const OMR_RATIO = 26.5 / 21.5;
 const BOX_WIDTH_RATIO = 0.7;
 let isDetected = false;
-
+let detectBusy = false;
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: { exact: "environment" } }
 }).then(s => video.srcObject = s)
@@ -73,60 +73,46 @@ video.addEventListener("loadedmetadata", () => {
   box.style.height = `${boxHeight}px`;
   box.style.left = `${(displayWidth - boxWidth) / 2}px`;
   box.style.top = `${(displayHeight - boxHeight) / 2}px`;
-   setInterval(updateDetectionState, 250);
+  
+  setInterval(updateDetectionState, 500);
 });
-function updateDetectionState() {
-  if (!video.videoWidth || !video.videoHeight) return;
 
-  const c = document.getElementById("canvas");
-  const ctx = c.getContext("2d", { willReadFrequently: true });
+async function updateDetectionState() {
+  if (detectBusy || !video.videoWidth || !video.videoHeight) return;
 
-  c.width = 320;
-  c.height = Math.round((video.videoHeight / video.videoWidth) * c.width);
-  ctx.drawImage(video, 0, 0, c.width, c.height);
+  detectBusy = true;
+  try {
+    const c = document.getElementById("canvas");
+    const ctx = c.getContext("2d");
+    const MAX_W = 480;
+    const scale = Math.min(1, MAX_W / video.videoWidth);
+    c.width = Math.max(1, Math.floor(video.videoWidth * scale));
+    c.height = Math.max(1, Math.floor(video.videoHeight * scale));
 
-  const x = Math.floor(c.width * ((parseFloat(box.style.left) || 0) / video.clientWidth));
-  const y = Math.floor(c.height * ((parseFloat(box.style.top) || 0) / video.clientHeight));
-  const w = Math.floor(c.width * ((parseFloat(box.style.width) || 0) / video.clientWidth));
-  const h = Math.floor(c.height * ((parseFloat(box.style.height) || 0) / video.clientHeight));
+    ctx.drawImage(video, 0, 0, c.width, c.height);
+    const data = c.toDataURL("image/jpeg", 0.55);
 
-  if (w <= 2 || h <= 2) return;
+    const res = await fetch("/detect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ img: data })
+    });
 
-  const data = ctx.getImageData(x, y, w, h).data;
+    if (!res.ok) return;
+    const body = await res.json();
+    const detectedNow = Boolean(body.detected);
 
-  let edgePixels = 0;
-  let tested = 0;
-
-  const stride = 2;
-  for (let j = stride; j < h - stride; j += stride) {
-    for (let i = stride; i < w - stride; i += stride) {
-      const idx = (j * w + i) * 4;
-      const idxR = (j * w + (i + stride)) * 4;
-      const idxD = ((j + stride) * w + i) * 4;
-
-      const p = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-      const pr = (data[idxR] + data[idxR + 1] + data[idxR + 2]) / 3;
-      const pd = (data[idxD] + data[idxD + 1] + data[idxD + 2]) / 3;
-
-      const gx = Math.abs(pr - p);
-      const gy = Math.abs(pd - p);
-      const grad = gx + gy;
-
-      if (grad > 35) edgePixels++;
-      tested++;
+    if (detectedNow !== isDetected) {
+      isDetected = detectedNow;
+      box.classList.toggle("detected", isDetected);
+      statusText.textContent = isDetected ? "OMR detected ✓" : "Waiting for document…";
     }
-  }
-
-  const edgeDensity = tested ? edgePixels / tested : 0;
-  const detectedNow = edgeDensity > 0.09;
-
-  if (detectedNow !== isDetected) {
-    isDetected = detectedNow;
-    box.classList.toggle("detected", isDetected);
-    statusText.textContent = isDetected ? "OMR detected ✓" : "Waiting for sheet…";
+  } catch (err) {
+    console.error("detect error", err);
+  } finally {
+    detectBusy = false;
   }
 }
-
 function capture() {
   const c = document.getElementById("canvas");
 
@@ -135,12 +121,13 @@ function capture() {
   const vh = video.videoHeight;
   const scale = Math.min(1, MAX_W / vw);
 
-  c.width = vw * scale;
-  c.height = vh * scale;
+ c.width = Math.max(1, Math.floor(vw * scale));
+  c.height = Math.max(1, Math.floor(vh * scale));
+
 
   c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
 
-  const data = c.toDataURL("image/jpeg", 0.7);
+  const data = c.toDataURL("image/jpeg", 0.92);
 
   fetch("/process", {
     method: "POST",
