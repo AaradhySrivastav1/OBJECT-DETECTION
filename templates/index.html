@@ -5,17 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-#wrap{position:relative;width:300px}
- #video{width:300px;display:block}
-#box{
- position:absolute;
- border:3px solid lime;
- top:15%;
- left:15%;
- width:70%;
- height:70%;
- pointer-events:none;
+#wrap { position: relative; width: 300px; }
+#video { width: 300px; display: block; }
+#box {
+  position: absolute;
+  border: 3px solid red;
+  top: 15%;
+  left: 15%;
+  width: 70%;
+  height: 70%;
+  pointer-events: none;
+  transition: border-color 150ms ease;
 }
+ #box.detected { border-color: lime; }
+#status { font-family: sans-serif; margin-top: 8px; color: #444; }
 </style>
 
 </head>
@@ -25,9 +28,10 @@
 <h3>Place OMR inside box</h3>
 
 <div id="wrap">
-<video id="video" autoplay playsinline></video>
-<div id="box"></div>
+ <video id="video" autoplay playsinline></video>
+  <div id="box"></div>
 </div>
+ <div id="status">Waiting for sheet…</div>
 
 <br>
 <button onclick="capture()">Capture</button>
@@ -42,19 +46,21 @@
  const video = document.getElementById("video");
 const wrap = document.getElementById("wrap");
 const box = document.getElementById("box");
+ const statusText = document.getElementById("status");
 
 const OMR_RATIO = 26.5 / 21.5;
 const BOX_WIDTH_RATIO = 0.7;
-
+let isDetected = false;
 
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: { exact: "environment" } }
 }).then(s => video.srcObject = s)
 .catch(() => {
-  navigator.mediaDevices.getUserMedia({ video: true })
-    .then(s => video.srcObject = s);
-});
- video.addEventListener("loadedmetadata", () => {
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(s => video.srcObject = s);
+  });
+
+video.addEventListener("loadedmetadata", () => {
   const displayWidth = video.clientWidth;
   const displayHeight = video.clientHeight;
   wrap.style.height = `${displayHeight}px`;
@@ -67,23 +73,74 @@ navigator.mediaDevices.getUserMedia({
   box.style.height = `${boxHeight}px`;
   box.style.left = `${(displayWidth - boxWidth) / 2}px`;
   box.style.top = `${(displayHeight - boxHeight) / 2}px`;
+   setInterval(updateDetectionState, 250);
 });
+function updateDetectionState() {
+  if (!video.videoWidth || !video.videoHeight) return;
 
+  const c = document.getElementById("canvas");
+  const ctx = c.getContext("2d", { willReadFrequently: true });
 
-function capture(){
+  c.width = 320;
+  c.height = Math.round((video.videoHeight / video.videoWidth) * c.width);
+  ctx.drawImage(video, 0, 0, c.width, c.height);
+
+  const x = Math.floor(c.width * ((parseFloat(box.style.left) || 0) / video.clientWidth));
+  const y = Math.floor(c.height * ((parseFloat(box.style.top) || 0) / video.clientHeight));
+  const w = Math.floor(c.width * ((parseFloat(box.style.width) || 0) / video.clientWidth));
+  const h = Math.floor(c.height * ((parseFloat(box.style.height) || 0) / video.clientHeight));
+
+  if (w <= 2 || h <= 2) return;
+
+  const data = ctx.getImageData(x, y, w, h).data;
+
+  let edgePixels = 0;
+  let tested = 0;
+
+  const stride = 2;
+  for (let j = stride; j < h - stride; j += stride) {
+    for (let i = stride; i < w - stride; i += stride) {
+      const idx = (j * w + i) * 4;
+      const idxR = (j * w + (i + stride)) * 4;
+      const idxD = ((j + stride) * w + i) * 4;
+
+      const p = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+      const pr = (data[idxR] + data[idxR + 1] + data[idxR + 2]) / 3;
+      const pd = (data[idxD] + data[idxD + 1] + data[idxD + 2]) / 3;
+
+      const gx = Math.abs(pr - p);
+      const gy = Math.abs(pd - p);
+      const grad = gx + gy;
+
+      if (grad > 35) edgePixels++;
+      tested++;
+    }
+  }
+
+  const edgeDensity = tested ? edgePixels / tested : 0;
+  const detectedNow = edgeDensity > 0.09;
+
+  if (detectedNow !== isDetected) {
+    isDetected = detectedNow;
+    box.classList.toggle("detected", isDetected);
+    statusText.textContent = isDetected ? "OMR detected ✓" : "Waiting for sheet…";
+  }
+}
+
+function capture() {
   const c = document.getElementById("canvas");
 
   const MAX_W = 640;
-  let vw = video.videoWidth;
-  let vh = video.videoHeight;
-  let scale = Math.min(1, MAX_W / vw);
+    const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const scale = Math.min(1, MAX_W / vw);
 
   c.width = vw * scale;
   c.height = vh * scale;
 
   c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
 
-  const data = c.toDataURL("image/jpeg", 0.6);
+  const data = c.toDataURL("image/jpeg", 0.7);
 
   fetch("/process", {
     method: "POST",
@@ -91,12 +148,11 @@ function capture(){
     body: JSON.stringify({ img: data })
   })
     .then(r => {
-      if(!r.ok) throw new Error("server error");
+      if (!r.ok) throw new Error("server error");
       return r.blob();
     })
     .then(b => {
-      document.getElementById("result").src =
-        URL.createObjectURL(b);
+      document.getElementById("result").src = URL.createObjectURL(b);
     })
     .catch(e => {
       alert("Capture failed. Try again.");
