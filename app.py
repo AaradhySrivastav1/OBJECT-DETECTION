@@ -900,7 +900,6 @@
 
 # if __name__ == "__main__":
 #     app.run(host="0.0.0.0", port=10000)
-
 from flask import Flask, render_template, request, jsonify
 import base64
 
@@ -910,16 +909,17 @@ import numpy as np
 app = Flask(__name__)
 
 OMR_RATIO = 26.5 / 21.5
+BOX_WIDTH_RATIO = 0.84
 X_RATIO = 0.005
 Y_RATIO = 0.57
 W_RATIO = 0.99
 H_RATIO = 0.22
 
-STABILITY_REQUIRED_FRAMES = 15
-SHAPE_DIFF_THRESHOLD = 0.02
-MIN_DOC_AREA_RATIO = 0.18
+STABILITY_REQUIRED_FRAMES = 6
+SHAPE_DIFF_THRESHOLD = 0.03
+MIN_DOC_AREA_RATIO = 0.12
 WARP_WIDTH = 900
-WARP_HEIGHT = 1200
+WARP_HEIGHT = int(WARP_WIDTH * OMR_RATIO)
 
 stability_state = {
     "last_contour": None,
@@ -960,8 +960,25 @@ def _order_points(points: np.ndarray) -> np.ndarray:
     rect[2] = points[np.argmax(s)]
     rect[1] = points[np.argmin(diff)]
     rect[3] = points[np.argmax(diff)]
-
     return rect
+
+
+def _omr_box_coords(width: int, height: int) -> tuple[int, int, int, int]:
+    max_width_by_height = int(height / OMR_RATIO)
+    box_width = min(int(width * BOX_WIDTH_RATIO), max_width_by_height)
+    box_height = int(box_width * OMR_RATIO)
+
+    x1 = max(0, (width - box_width) // 2)
+    y1 = max(0, (height - box_height) // 2)
+    x2 = min(width, x1 + box_width)
+    y2 = min(height, y1 + box_height)
+    return x1, y1, x2, y2
+
+
+def _extract_box_region(frame: np.ndarray) -> np.ndarray:
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = _omr_box_coords(w, h)
+    return frame[y1:y2, x1:x2]
 
 
 def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
@@ -988,8 +1005,7 @@ def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, n
         if area < min_area:
             continue
 
-        quad = approx.reshape(4, 2).astype("float32")
-        quad = _order_points(quad)
+        quad = _order_points(approx.reshape(4, 2).astype("float32"))
 
         w_top = np.linalg.norm(quad[1] - quad[0])
         w_bottom = np.linalg.norm(quad[2] - quad[3])
@@ -997,7 +1013,7 @@ def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, n
         h_left = np.linalg.norm(quad[3] - quad[0])
 
         doc_ratio = max(h_left, h_right) / max(max(w_top, w_bottom), 1.0)
-        if abs(doc_ratio - OMR_RATIO) > OMR_RATIO * 0.45:
+        if abs(doc_ratio - OMR_RATIO) > OMR_RATIO * 0.5:
             continue
 
         return quad, gray, edges
@@ -1007,27 +1023,20 @@ def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, n
 
 def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
     rect = _order_points(pts)
-    (tl, tr, br, bl) = rect
-
     dst = np.array(
         [[0, 0], [WARP_WIDTH - 1, 0], [WARP_WIDTH - 1, WARP_HEIGHT - 1], [0, WARP_HEIGHT - 1]],
         dtype="float32",
     )
 
-    matrix = cv2.getPerspectiveTransform(np.array([tl, tr, br, bl], dtype="float32"), dst)
+    matrix = cv2.getPerspectiveTransform(rect, dst)
     return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
 
 
 def apply_lighting_normalization(image: np.ndarray) -> np.ndarray:
-    if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image
-
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
     normalized = clahe.apply(gray)
-
-    binary = cv2.adaptiveThreshold(
+    return cv2.adaptiveThreshold(
         normalized,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -1035,7 +1044,6 @@ def apply_lighting_normalization(image: np.ndarray) -> np.ndarray:
         21,
         8,
     )
-    return binary
 
 
 def stability_check(current_contour: np.ndarray | None) -> bool:
@@ -1052,7 +1060,6 @@ def stability_check(current_contour: np.ndarray | None) -> bool:
         return False
 
     diff = cv2.matchShapes(stability_state["last_contour"], current_contour, cv2.CONTOURS_MATCH_I1, 0.0)
-
     if diff < SHAPE_DIFF_THRESHOLD:
         stability_state["count"] += 1
     else:
@@ -1064,31 +1071,29 @@ def stability_check(current_contour: np.ndarray | None) -> bool:
 
 
 def process_frame(frame: np.ndarray) -> dict:
-    quad, gray, edges = detect_document(frame)
+    roi = _extract_box_region(frame)
+    quad, gray, edges = detect_document(roi)
 
     stable = stability_check(quad)
-    can_capture = quad is not None
+    detected = quad is not None
+    can_capture = detected
 
-    annotated = frame.copy()
-    if quad is not None:
-        cv2.polylines(annotated, [quad.astype(np.int32)], True, (0, 255, 0) if stable else (0, 0, 255), 3)
-
-    if quad is not None:
-        warped = four_point_transform(frame, quad)
+    if detected:
+        warped = four_point_transform(roi, quad)
     else:
-        warped = cv2.resize(frame, (WARP_WIDTH, WARP_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        warped = cv2.resize(roi, (WARP_WIDTH, WARP_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
-    normalized_binary = apply_lighting_normalization(warped)
+    processed = apply_lighting_normalization(warped)
 
     return {
         "gray": gray,
         "edges": edges,
         "quad": quad,
         "stable": stable,
+        "detected": detected,
         "can_capture": can_capture,
-        "annotated": annotated,
         "warped": warped,
-        "processed": normalized_binary,
+        "processed": processed,
     }
 
 
@@ -1109,11 +1114,9 @@ def detect():
         return jsonify({"detected": False, "stable": False, "can_capture": False}), 200
 
     frame_info = process_frame(img)
-    quad = frame_info["quad"]
-
     return jsonify(
         {
-            "detected": quad is not None,
+            "detected": frame_info["detected"],
             "stable": frame_info["stable"],
             "can_capture": frame_info["can_capture"],
         }
@@ -1164,3 +1167,4 @@ def process():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
