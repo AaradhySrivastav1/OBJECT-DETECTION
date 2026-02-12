@@ -947,8 +947,7 @@ def _encode_image_data_url(image: np.ndarray, quality: int = 90) -> str | None:
     if not ok:
         return None
 
-    b64 = base64.b64encode(buf.tobytes()).decode("ascii")
-    return f"data:image/jpeg;base64,{b64}"
+    return f"data:image/jpeg;base64,{base64.b64encode(buf.tobytes()).decode('ascii')}"
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -984,7 +983,6 @@ def _extract_box_region(frame: np.ndarray) -> np.ndarray:
 def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
     edges = cv2.Canny(blurred, 50, 150)
     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
 
@@ -1027,7 +1025,6 @@ def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
         [[0, 0], [WARP_WIDTH - 1, 0], [WARP_WIDTH - 1, WARP_HEIGHT - 1], [0, WARP_HEIGHT - 1]],
         dtype="float32",
     )
-
     matrix = cv2.getPerspectiveTransform(rect, dst)
     return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
 
@@ -1060,39 +1057,59 @@ def stability_check(current_contour: np.ndarray | None) -> bool:
         return False
 
     diff = cv2.matchShapes(stability_state["last_contour"], current_contour, cv2.CONTOURS_MATCH_I1, 0.0)
-    if diff < SHAPE_DIFF_THRESHOLD:
-        stability_state["count"] += 1
-    else:
-        stability_state["count"] = 1
+    stability_state["count"] = stability_state["count"] + 1 if diff < SHAPE_DIFF_THRESHOLD else 1
 
     stability_state["last_contour"] = current_contour.copy()
     stability_state["stable"] = stability_state["count"] >= STABILITY_REQUIRED_FRAMES
     return stability_state["stable"]
 
 
+def _make_pipeline_preview(
+    roi: np.ndarray,
+    edges: np.ndarray,
+    quad: np.ndarray | None,
+    pre_crop_vis: np.ndarray,
+) -> np.ndarray:
+    roi_vis = roi.copy()
+    if quad is not None:
+        cv2.polylines(roi_vis, [quad.astype(np.int32)], True, (0, 255, 0), 3)
+
+    edges_vis = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+    h_target = 320
+
+    def _resize_keep(img: np.ndarray) -> np.ndarray:
+        h, w = img.shape[:2]
+        nw = max(1, int(w * (h_target / h)))
+        return cv2.resize(img, (nw, h_target), interpolation=cv2.INTER_AREA)
+
+    left = _resize_keep(roi_vis)
+    mid = _resize_keep(edges_vis)
+    right = _resize_keep(pre_crop_vis)
+
+    cv2.putText(left, "Captured Box", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 50, 50), 2)
+    cv2.putText(mid, "Edge + Shape", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.putText(right, "Final Before Crop", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (50, 180, 50), 2)
+
+    return cv2.hconcat([left, mid, right])
+
+
 def process_frame(frame: np.ndarray) -> dict:
     roi = _extract_box_region(frame)
-    quad, gray, edges = detect_document(roi)
+    quad, _, edges = detect_document(roi)
 
     stable = stability_check(quad)
     detected = quad is not None
-    can_capture = detected
 
-    if detected:
-        warped = four_point_transform(roi, quad)
-    else:
-        warped = cv2.resize(roi, (WARP_WIDTH, WARP_HEIGHT), interpolation=cv2.INTER_LINEAR)
-
+    warped = four_point_transform(roi, quad) if detected else cv2.resize(roi, (WARP_WIDTH, WARP_HEIGHT), interpolation=cv2.INTER_LINEAR)
     processed = apply_lighting_normalization(warped)
 
     return {
-        "gray": gray,
+        "roi": roi,
         "edges": edges,
         "quad": quad,
         "stable": stable,
         "detected": detected,
-        "can_capture": can_capture,
-        "warped": warped,
+        "can_capture": detected,
         "processed": processed,
     }
 
@@ -1135,7 +1152,6 @@ def process():
         return "decode failed", 400
 
     frame_info = process_frame(img)
-    warped = frame_info["warped"]
     processed = frame_info["processed"]
 
     oh, ow = processed.shape[:2]
@@ -1151,14 +1167,22 @@ def process():
 
     answer = processed[ay : ay + ah, ax : ax + aw]
 
-    captured_url = _encode_image_data_url(warped, quality=92)
+    pre_crop_vis = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+    cv2.rectangle(pre_crop_vis, (ax, ay), (ax + aw, ay + ah), (0, 255, 255), 3)
+
+    pipeline_preview = _make_pipeline_preview(frame_info["roi"], frame_info["edges"], frame_info["quad"], pre_crop_vis)
+
+    captured_url = _encode_image_data_url(frame_info["roi"], quality=92)
+    pipeline_url = _encode_image_data_url(pipeline_preview, quality=92)
     cropped_url = _encode_image_data_url(answer, quality=92)
-    if not captured_url or not cropped_url:
+
+    if not captured_url or not pipeline_url or not cropped_url:
         return "encode failed", 400
 
     return jsonify(
         {
             "captured_image": captured_url,
+            "pipeline_image": pipeline_url,
             "cropped_image": cropped_url,
             "stable": frame_info["stable"],
         }
@@ -1167,4 +1191,3 @@ def process():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
