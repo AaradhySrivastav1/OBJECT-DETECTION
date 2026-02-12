@@ -654,9 +654,255 @@
 
 
 
-from flask import Flask, render_template, request, send_file, jsonify
+# from flask import Flask, render_template, request, send_file, jsonify
+# import base64
+# from io import BytesIO
+
+# import cv2
+# import numpy as np
+
+# app = Flask(__name__)
+
+# OMR_RATIO = 26.5 / 21.5
+# X_RATIO = 0.005
+# Y_RATIO = 0.57
+# W_RATIO = 0.99
+# H_RATIO = 0.22
+
+# STABILITY_REQUIRED_FRAMES = 15
+# SHAPE_DIFF_THRESHOLD = 0.02
+# MIN_DOC_AREA_RATIO = 0.18
+# WARP_WIDTH = 900
+# WARP_HEIGHT = 1200
+
+# stability_state = {
+#     "last_contour": None,
+#     "count": 0,
+#     "stable": False,
+# }
+
+
+# def _decode_data_url_image(data: str) -> np.ndarray | None:
+#     _, _, encoded = data.partition(",")
+#     if not encoded:
+#         return None
+
+#     try:
+#         img_bytes = base64.b64decode(encoded)
+#     except (base64.binascii.Error, ValueError):
+#         return None
+
+#     return cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+
+
+# def _order_points(points: np.ndarray) -> np.ndarray:
+#     rect = np.zeros((4, 2), dtype="float32")
+#     s = points.sum(axis=1)
+#     diff = np.diff(points, axis=1)
+
+#     rect[0] = points[np.argmin(s)]
+#     rect[2] = points[np.argmax(s)]
+#     rect[1] = points[np.argmin(diff)]
+#     rect[3] = points[np.argmax(diff)]
+
+#     return rect
+
+
+# def detect_document(frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
+#     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+#     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+#     edges = cv2.Canny(blurred, 50, 150)
+#     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
+
+#     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#     contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+#     min_area = MIN_DOC_AREA_RATIO * frame.shape[0] * frame.shape[1]
+#     for contour in contours[:20]:
+#         perimeter = cv2.arcLength(contour, True)
+#         if perimeter <= 0:
+#             continue
+
+#         approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+#         if len(approx) != 4:
+#             continue
+
+#         area = cv2.contourArea(approx)
+#         if area < min_area:
+#             continue
+
+#         quad = approx.reshape(4, 2).astype("float32")
+#         quad = _order_points(quad)
+
+#         w_top = np.linalg.norm(quad[1] - quad[0])
+#         w_bottom = np.linalg.norm(quad[2] - quad[3])
+#         h_right = np.linalg.norm(quad[2] - quad[1])
+#         h_left = np.linalg.norm(quad[3] - quad[0])
+
+#         doc_ratio = max(h_left, h_right) / max(max(w_top, w_bottom), 1.0)
+#         if abs(doc_ratio - OMR_RATIO) > OMR_RATIO * 0.45:
+#             continue
+
+#         return quad, gray, edges
+
+#     return None, gray, edges
+
+
+# def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
+#     rect = _order_points(pts)
+#     (tl, tr, br, bl) = rect
+
+#     dst = np.array(
+#         [[0, 0], [WARP_WIDTH - 1, 0], [WARP_WIDTH - 1, WARP_HEIGHT - 1], [0, WARP_HEIGHT - 1]],
+#         dtype="float32",
+#     )
+
+#     matrix = cv2.getPerspectiveTransform(np.array([tl, tr, br, bl], dtype="float32"), dst)
+#     return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
+
+
+# def apply_lighting_normalization(image: np.ndarray) -> np.ndarray:
+#     if len(image.shape) == 3:
+#         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#     else:
+#         gray = image
+
+#     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+#     normalized = clahe.apply(gray)
+
+#     binary = cv2.adaptiveThreshold(
+#         normalized,
+#         255,
+#         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+#         cv2.THRESH_BINARY,
+#         21,
+#         8,
+#     )
+#     return binary
+
+
+# def stability_check(current_contour: np.ndarray | None) -> bool:
+#     if current_contour is None:
+#         stability_state["last_contour"] = None
+#         stability_state["count"] = 0
+#         stability_state["stable"] = False
+#         return False
+
+#     if stability_state["last_contour"] is None:
+#         stability_state["last_contour"] = current_contour.copy()
+#         stability_state["count"] = 1
+#         stability_state["stable"] = False
+#         return False
+
+#     diff = cv2.matchShapes(stability_state["last_contour"], current_contour, cv2.CONTOURS_MATCH_I1, 0.0)
+
+#     if diff < SHAPE_DIFF_THRESHOLD:
+#         stability_state["count"] += 1
+#     else:
+#         stability_state["count"] = 1
+
+#     stability_state["last_contour"] = current_contour.copy()
+#     stability_state["stable"] = stability_state["count"] >= STABILITY_REQUIRED_FRAMES
+#     return stability_state["stable"]
+
+
+# def process_frame(frame: np.ndarray) -> dict:
+#     quad, gray, edges = detect_document(frame)
+
+#     stable = stability_check(quad)
+#     can_capture = quad is not None and stable
+
+#     annotated = frame.copy()
+#     if quad is not None:
+#         cv2.polylines(annotated, [quad.astype(np.int32)], True, (0, 255, 0) if stable else (0, 0, 255), 3)
+
+#     if quad is not None:
+#         warped = four_point_transform(frame, quad)
+#     else:
+#         warped = cv2.resize(frame, (WARP_WIDTH, WARP_HEIGHT), interpolation=cv2.INTER_LINEAR)
+
+#     normalized_binary = apply_lighting_normalization(warped)
+
+#     return {
+#         "gray": gray,
+#         "edges": edges,
+#         "quad": quad,
+#         "stable": stable,
+#         "can_capture": can_capture,
+#         "annotated": annotated,
+#         "warped": warped,
+#         "processed": normalized_binary,
+#     }
+
+
+# @app.route("/")
+# def index():
+#     return render_template("index.html")
+
+
+# @app.route("/detect", methods=["POST"])
+# def detect():
+#     payload = request.get_json(silent=True) or {}
+#     data = payload.get("img")
+#     if not data:
+#         return jsonify({"detected": False, "stable": False, "can_capture": False}), 200
+
+#     img = _decode_data_url_image(data)
+#     if img is None:
+#         return jsonify({"detected": False, "stable": False, "can_capture": False}), 200
+
+#     frame_info = process_frame(img)
+#     quad = frame_info["quad"]
+
+#     return jsonify(
+#         {
+#             "detected": quad is not None,
+#             "stable": frame_info["stable"],
+#             "can_capture": frame_info["can_capture"],
+#         }
+#     )
+
+
+# @app.route("/process", methods=["POST"])
+# def process():
+#     payload = request.get_json(silent=True) or {}
+#     data = payload.get("img") or request.form.get("img")
+#     if not data:
+#         return "no image", 400
+
+#     img = _decode_data_url_image(data)
+#     if img is None:
+#         return "decode failed", 400
+
+#     frame_info = process_frame(img)
+#     processed = frame_info["processed"]
+
+#     oh, ow = processed.shape[:2]
+#     ax = int(ow * X_RATIO)
+#     ay = int(oh * Y_RATIO)
+#     aw = int(ow * W_RATIO)
+#     ah = int(oh * H_RATIO)
+
+#     ax = max(0, ax)
+#     ay = max(0, ay)
+#     aw = max(1, min(ow - ax, aw))
+#     ah = max(1, min(oh - ay, ah))
+
+#     answer = processed[ay : ay + ah, ax : ax + aw]
+
+#     ok, buf = cv2.imencode(".jpg", answer)
+#     if not ok:
+#         return "encode failed", 400
+
+#     return send_file(BytesIO(buf), mimetype="image/jpeg")
+
+
+# if __name__ == "__main__":
+#     app.run(host="0.0.0.0", port=10000)
+
+from flask import Flask, render_template, request, jsonify
 import base64
-from io import BytesIO
 
 import cv2
 import numpy as np
@@ -693,6 +939,16 @@ def _decode_data_url_image(data: str) -> np.ndarray | None:
         return None
 
     return cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+
+
+def _encode_image_data_url(image: np.ndarray, quality: int = 90) -> str | None:
+    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    ok, buf = cv2.imencode(".jpg", image, encode_params)
+    if not ok:
+        return None
+
+    b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -811,7 +1067,7 @@ def process_frame(frame: np.ndarray) -> dict:
     quad, gray, edges = detect_document(frame)
 
     stable = stability_check(quad)
-    can_capture = quad is not None and stable
+    can_capture = quad is not None
 
     annotated = frame.copy()
     if quad is not None:
@@ -876,6 +1132,7 @@ def process():
         return "decode failed", 400
 
     frame_info = process_frame(img)
+    warped = frame_info["warped"]
     processed = frame_info["processed"]
 
     oh, ow = processed.shape[:2]
@@ -891,15 +1148,23 @@ def process():
 
     answer = processed[ay : ay + ah, ax : ax + aw]
 
-    ok, buf = cv2.imencode(".jpg", answer)
-    if not ok:
+    captured_url = _encode_image_data_url(warped, quality=92)
+    cropped_url = _encode_image_data_url(answer, quality=92)
+    if not captured_url or not cropped_url:
         return "encode failed", 400
 
-    return send_file(BytesIO(buf), mimetype="image/jpeg")
+    return jsonify(
+        {
+            "captured_image": captured_url,
+            "cropped_image": cropped_url,
+            "stable": frame_info["stable"],
+        }
+    )
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
