@@ -1,40 +1,68 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OMR Capture</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
-    #wrap { position: relative; width: 320px; }
-    #video { width: 320px; display: block; border-radius: 8px; }
+    :root {
+      --w: 340px;
+      --red: #ff2d2d;
+      --green: #1fbf4c;
+      --muted: #555;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    #wrap {
+      position: relative;
+      width: var(--w);
+      max-width: 100%;
+    }
+
+    #video {
+      width: 100%;
+      display: block;
+      border-radius: 8px;
+      background: #000;
+    }
 
     #box {
       position: absolute;
-      border: 3px solid red;
-      top: 3%;
-      left: 3%;
-      width: 94%;
-      height: 94%;
-      pointer-events: none;
+      border: 3px solid var(--red);
       border-radius: 8px;
-      transition: border-color 150ms ease;
+      pointer-events: none;
+      transition: border-color 140ms ease;
     }
 
-    #box.detected { border-color: orange; }
-    #box.stable { border-color: lime; }
+    #box.detected {
+      border-color: var(--green);
+    }
 
     #status {
-      font-family: sans-serif;
       margin-top: 8px;
-      color: #444;
-      min-height: 20px;
+      min-height: 22px;
+      color: var(--muted);
+      font-size: 18px;
     }
 
     #controls {
+      margin-top: 10px;
       display: flex;
       gap: 8px;
-      align-items: center;
-      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
     }
 
     #captureBtn:disabled {
@@ -43,184 +71,191 @@
     }
 
     .output-grid {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 12px;
-      flex-wrap: wrap;
       margin-top: 14px;
+      max-width: 1000px;
     }
 
     .output-card {
-      font-family: sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       color: #333;
     }
 
     .output-card img {
-      width: 320px;
+      width: 100%;
+      max-width: var(--w);
       border: 1px solid #ddd;
       border-radius: 6px;
       display: block;
-      margin-top: 4px;
+      margin-top: 6px;
+      background: #f7f7f7;
+      min-height: 120px;
+      object-fit: contain;
     }
   </style>
 </head>
 
 <body>
 
-<h3>Place OMR inside frame</h3>
+  <h3>Place OMR inside frame</h3>
 
-<div id="wrap">
-  <video id="video" autoplay playsinline></video>
-  <div id="box"></div>
-</div>
-
-<div id="status">Searching for document edges…</div>
-
-<div id="controls">
-  <button id="captureBtn" onclick="capture()" disabled>Capture</button>
-  <button onclick="capture(true)">Capture Anyway</button>
-</div>
-
-<canvas id="canvas" style="display:none"></canvas>
-
-<div class="output-grid">
-  <div class="output-card">
-    Captured / Aligned Image (Debug)
-    <img id="capturedResult" alt="Captured aligned image">
+  <div id="wrap">
+    <video id="video" autoplay playsinline></video>
+    <div id="box"></div>
   </div>
 
-  <div class="output-card">
-    Cropped Image (Debug)
-    <img id="croppedResult" alt="Cropped debug image">
+  <div id="status">Searching for document inside red box…</div>
+
+  <div id="controls">
+    <button id="captureBtn" onclick="capture()" disabled>Capture</button>
+    <button onclick="capture(true)">Capture Anyway</button>
   </div>
-</div>
 
-<script>
-const video = document.getElementById("video");
-const wrap = document.getElementById("wrap");
-const box = document.getElementById("box");
-const statusText = document.getElementById("status");
-const captureBtn = document.getElementById("captureBtn");
-const capturedResult = document.getElementById("capturedResult");
-const croppedResult = document.getElementById("croppedResult");
+  <canvas id="canvas" style="display:none"></canvas>
 
-const OMR_RATIO = 26.5 / 21.5;
-const BOX_WIDTH_RATIO = 0.84;
+  <div class="output-grid">
+    <div class="output-card">
+      Captured / Aligned Image (Debug)
+      <img id="capturedResult" alt="Captured aligned image" />
+    </div>
 
-let detectBusy = false;
+    <div class="output-card">
+      Cropped Image (Debug)
+      <img id="croppedResult" alt="Cropped debug image" />
+    </div>
+  </div>
 
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { ideal: "environment" } }
-}).then(stream => {
-  video.srcObject = stream;
-}).catch(() => {
-  navigator.mediaDevices.getUserMedia({ video: true })
-    .then(stream => video.srcObject = stream);
-});
+  <script>
+    const video = document.getElementById("video");
+    const wrap = document.getElementById("wrap");
+    const box = document.getElementById("box");
+    const statusText = document.getElementById("status");
+    const captureBtn = document.getElementById("captureBtn");
+    const capturedResult = document.getElementById("capturedResult");
+    const croppedResult = document.getElementById("croppedResult");
+    const canvas = document.getElementById("canvas");
 
-video.addEventListener("loadedmetadata", () => {
-  updateBoundingBox();
-  setInterval(updateDetectionState, 180);
-});
+    const OMR_RATIO = 26.5 / 21.5;
+    const BOX_WIDTH_RATIO = 0.84;
 
-window.addEventListener("resize", updateBoundingBox);
+    let detectBusy = false;
 
-function updateBoundingBox() {
-  const displayWidth = video.clientWidth;
-  const displayHeight = video.clientHeight;
-  if (!displayWidth || !displayHeight) return;
-
-  wrap.style.height = `${displayHeight}px`;
-
-  const maxWidthByHeight = displayHeight / OMR_RATIO;
-  const boxWidth = Math.min(displayWidth * BOX_WIDTH_RATIO, maxWidthByHeight);
-  const boxHeight = boxWidth * OMR_RATIO;
-
-  box.style.width = `${boxWidth}px`;
-  box.style.height = `${boxHeight}px`;
-  box.style.left = `${(displayWidth - boxWidth) / 2}px`;
-  box.style.top = `${(displayHeight - boxHeight) / 2}px`;
-}
-
-async function updateDetectionState() {
-  if (detectBusy || !video.videoWidth || !video.videoHeight) return;
-  detectBusy = true;
-
-  try {
-    const c = document.getElementById("canvas");
-    const ctx = c.getContext("2d");
-
-    const MAX_W = 640;
-    const scale = Math.min(1, MAX_W / video.videoWidth);
-    c.width = Math.floor(video.videoWidth * scale);
-    c.height = Math.floor(video.videoHeight * scale);
-
-    ctx.drawImage(video, 0, 0, c.width, c.height);
-    const data = c.toDataURL("image/jpeg", 0.7);
-
-    const res = await fetch("/detect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ img: data })
-    });
-
-    if (!res.ok) return;
-    const body = await res.json();
-
-    const detected = !!body.detected;
-    const stable = !!body.stable;
-    const canCapture = !!body.can_capture;
-
-    box.classList.toggle("detected", detected && !stable);
-    box.classList.toggle("stable", stable);
-
-    if (!detected) {
-      statusText.textContent = "Searching for document edges…";
-    } else if (!stable) {
-      statusText.textContent = "Document detected. Hold still...";
-    } else {
-      statusText.textContent = "Stable OMR detected ✓ Ready to capture";
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        console.error("Camera start failed", err);
+        statusText.textContent =
+          "Camera access failed. Please allow camera permission.";
+      }
     }
 
-    captureBtn.disabled = !canCapture;
+    function updateBoundingBox() {
+      const displayWidth = video.clientWidth;
+      const displayHeight = video.clientHeight;
+      if (!displayWidth || !displayHeight) return;
 
-  } catch (e) {
-    console.error(e);
-  } finally {
-    detectBusy = false;
-  }
-}
+      wrap.style.height = `${displayHeight}px`;
 
-function capture(force = false) {
-  if (!force && captureBtn.disabled) return;
+      const maxWidthByHeight = displayHeight / OMR_RATIO;
+      const boxWidth = Math.min(displayWidth * BOX_WIDTH_RATIO, maxWidthByHeight);
+      const boxHeight = boxWidth * OMR_RATIO;
 
-  const c = document.getElementById("canvas");
-  const ctx = c.getContext("2d");
+      box.style.width = `${boxWidth}px`;
+      box.style.height = `${boxHeight}px`;
+      box.style.left = `${(displayWidth - boxWidth) / 2}px`;
+      box.style.top = `${(displayHeight - boxHeight) / 2}px`;
+    }
 
-  const MAX_W = 1280;
-  const scale = Math.min(1, MAX_W / video.videoWidth);
-  c.width = Math.floor(video.videoWidth * scale);
-  c.height = Math.floor(video.videoHeight * scale);
+    video.addEventListener("loadedmetadata", () => {
+      updateBoundingBox();
+      setInterval(updateDetectionState, 180);
+    });
 
-  ctx.drawImage(video, 0, 0, c.width, c.height);
-  const data = c.toDataURL("image/jpeg", 0.92);
+    window.addEventListener("resize", updateBoundingBox);
 
-  fetch("/process", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img: data })
-  })
-  .then(r => r.json())
-  .then(payload => {
-    capturedResult.src = payload.captured_image || "";
-    croppedResult.src = payload.cropped_image || "";
-  })
-  .catch(err => {
-    alert("Capture failed. Try again.");
-    console.error(err);
-  });
-}
-</script>
+    async function updateDetectionState() {
+      if (detectBusy || !video.videoWidth || !video.videoHeight) return;
+      detectBusy = true;
+
+      try {
+        const ctx = canvas.getContext("2d");
+
+        const MAX_W = 640;
+        const scale = Math.min(1, MAX_W / video.videoWidth);
+
+        canvas.width = Math.floor(video.videoWidth * scale);
+        canvas.height = Math.floor(video.videoHeight * scale);
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const data = canvas.toDataURL("image/jpeg", 0.7);
+
+        const res = await fetch("/detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ img: data })
+        });
+
+        if (!res.ok) return;
+
+        const body = await res.json();
+        const detected = Boolean(body.detected);
+        const canCapture = Boolean(body.can_capture);
+
+        box.classList.toggle("detected", detected);
+        statusText.textContent = detected
+          ? "Document detected inside box ✓"
+          : "Searching for document inside red box…";
+
+        captureBtn.disabled = !canCapture;
+      } catch (err) {
+        console.error("detect error", err);
+      } finally {
+        detectBusy = false;
+      }
+    }
+
+    function capture(force = false) {
+      if (!force && captureBtn.disabled) return;
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      const ctx = canvas.getContext("2d");
+      const MAX_W = 1280;
+      const scale = Math.min(1, MAX_W / video.videoWidth);
+
+      canvas.width = Math.floor(video.videoWidth * scale);
+      canvas.height = Math.floor(video.videoHeight * scale);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const data = canvas.toDataURL("image/jpeg", 0.92);
+
+      fetch("/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ img: data })
+      })
+        .then(r => {
+          if (!r.ok) throw new Error("server error");
+          return r.json();
+        })
+        .then(payload => {
+          capturedResult.src = payload.captured_image || "";
+          croppedResult.src = payload.cropped_image || "";
+        })
+        .catch(err => {
+          alert("Capture failed. Try again.");
+          console.error(err);
+        });
+    }
+
+    startCamera();
+  </script>
 
 </body>
 </html>
