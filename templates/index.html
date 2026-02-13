@@ -118,17 +118,17 @@
 <div class="output-grid">
   <div class="output-card">
     1) Captured Image (Inside Red Box)
-    <img id="capturedResult" alt="Captured image" />
+    <img id="capturedResult" />
   </div>
 
   <div class="output-card">
     2) Edge + CamScanner Final (Before Crop)
-    <img id="pipelineResult" alt="Pipeline preview image" />
+    <img id="pipelineResult" />
   </div>
 
   <div class="output-card">
     3) Cropped Image (Final Output)
-    <img id="croppedResult" alt="Cropped image" />
+    <img id="croppedResult" />
   </div>
 </div>
 
@@ -156,9 +156,8 @@
       });
       video.srcObject = stream;
     } catch (err) {
-      console.error("Camera start failed", err);
-      statusText.textContent =
-        "Camera access failed. Please allow camera permission.";
+      console.error(err);
+      statusText.textContent = "Camera access failed.";
     }
   }
 
@@ -187,39 +186,36 @@
   window.addEventListener("resize", updateBoundingBox);
 
   async function updateDetectionState() {
-    if (detectBusy || !video.videoWidth || !video.videoHeight) return;
+    if (detectBusy || !video.videoWidth) return;
     detectBusy = true;
 
     try {
       const ctx = canvas.getContext("2d");
       const scale = Math.min(1, 640 / video.videoWidth);
 
-      canvas.width = Math.floor(video.videoWidth * scale);
-      canvas.height = Math.floor(video.videoHeight * scale);
-
+      canvas.width = video.videoWidth * scale;
+      canvas.height = video.videoHeight * scale;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.7);
+
+      const img = canvas.toDataURL("image/jpeg", 0.7);
 
       const res = await fetch("/detect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ img: data })
+        body: JSON.stringify({ img })
       });
 
       if (!res.ok) return;
 
-      const body = await res.json();
-      const detected = Boolean(body.detected);
-      const canCapture = Boolean(body.can_capture);
+      const data = await res.json();
+      box.classList.toggle("detected", data.detected);
+      captureBtn.disabled = !data.can_capture;
 
-      box.classList.toggle("detected", detected);
-      captureBtn.disabled = !canCapture;
-
-      statusText.textContent = detected
-        ? "Document detected inside box ✓"
+      statusText.textContent = data.detected
+        ? "Document detected ✓"
         : "Searching for document inside red box…";
-    } catch (err) {
-      console.error("detect error", err);
+    } catch (e) {
+      console.error(e);
     } finally {
       detectBusy = false;
     }
@@ -227,35 +223,28 @@
 
   function capture(force = false) {
     if (!force && captureBtn.disabled) return;
-    if (!video.videoWidth || !video.videoHeight) return;
 
     const ctx = canvas.getContext("2d");
     const scale = Math.min(1, 1280 / video.videoWidth);
 
-    canvas.width = Math.floor(video.videoWidth * scale);
-    canvas.height = Math.floor(video.videoHeight * scale);
+    canvas.width = video.videoWidth * scale;
+    canvas.height = video.videoHeight * scale;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const data = canvas.toDataURL("image/jpeg", 0.92);
+    const img = canvas.toDataURL("image/jpeg", 0.92);
 
     fetch("/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ img: data })
+      body: JSON.stringify({ img })
     })
-      .then(r => {
-        if (!r.ok) throw new Error("server error");
-        return r.json();
+      .then(r => r.json())
+      .then(d => {
+        capturedResult.src = d.captured_image || "";
+        pipelineResult.src = d.pipeline_image || "";
+        croppedResult.src = d.cropped_image || "";
       })
-      .then(payload => {
-        capturedResult.src = payload.captured_image || "";
-        pipelineResult.src = payload.pipeline_image || "";
-        croppedResult.src = payload.cropped_image || "";
-      })
-      .catch(err => {
-        alert("Capture failed. Try again.");
-        console.error(err);
-      });
+      .catch(console.error);
   }
 
   startCamera();
