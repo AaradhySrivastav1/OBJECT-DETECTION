@@ -1,4 +1,4 @@
-<!-- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -70,6 +70,10 @@
       cursor: not-allowed;
     }
 
+    .output-grid.hidden {
+      display: none;
+    }
+
     .output-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -115,7 +119,7 @@
 
 <canvas id="canvas" style="display:none"></canvas>
 
-<div class="output-grid">
+<div id="outputSection" class="output-grid hidden">
   <div class="output-card">
     1) Captured Image (Inside Red Box)
     <img id="capturedResult" />
@@ -127,7 +131,12 @@
   </div>
 
   <div class="output-card">
-    3) Cropped Image (Final Output)
+    3) Biggest Rectangle Only (Before Crop)
+    <img id="biggestRectResult" />
+  </div>
+
+  <div class="output-card">
+    4) Cropped Image (Final Output)
     <img id="croppedResult" />
   </div>
 </div>
@@ -140,8 +149,10 @@
   const captureBtn = document.getElementById("captureBtn");
   const capturedResult = document.getElementById("capturedResult");
   const pipelineResult = document.getElementById("pipelineResult");
+  const biggestRectResult = document.getElementById("biggestRectResult");
   const croppedResult = document.getElementById("croppedResult");
   const canvas = document.getElementById("canvas");
+  const outputSection = document.getElementById("outputSection");
 
   const OMR_RATIO = 26.5 / 21.5;
   const BOX_WIDTH_RATIO = 0.84;
@@ -157,7 +168,8 @@
       video.srcObject = stream;
     } catch (err) {
       console.error(err);
-      statusText.textContent = "Camera access failed.";
+      statusText.textContent =
+        "Camera access failed. Please allow camera permission.";
     }
   }
 
@@ -186,15 +198,15 @@
   window.addEventListener("resize", updateBoundingBox);
 
   async function updateDetectionState() {
-    if (detectBusy || !video.videoWidth) return;
+    if (detectBusy || !video.videoWidth || !video.videoHeight) return;
     detectBusy = true;
 
     try {
       const ctx = canvas.getContext("2d");
       const scale = Math.min(1, 640 / video.videoWidth);
 
-      canvas.width = video.videoWidth * scale;
-      canvas.height = video.videoHeight * scale;
+      canvas.width = Math.floor(video.videoWidth * scale);
+      canvas.height = Math.floor(video.videoHeight * scale);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const img = canvas.toDataURL("image/jpeg", 0.7);
@@ -212,10 +224,10 @@
       captureBtn.disabled = !data.can_capture;
 
       statusText.textContent = data.detected
-        ? "Document detected ✓"
+        ? "Document detected inside box ✓"
         : "Searching for document inside red box…";
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error("detect error", err);
     } finally {
       detectBusy = false;
     }
@@ -223,12 +235,13 @@
 
   function capture(force = false) {
     if (!force && captureBtn.disabled) return;
+    if (!video.videoWidth || !video.videoHeight) return;
 
     const ctx = canvas.getContext("2d");
     const scale = Math.min(1, 1280 / video.videoWidth);
 
-    canvas.width = video.videoWidth * scale;
-    canvas.height = video.videoHeight * scale;
+    canvas.width = Math.floor(video.videoWidth * scale);
+    canvas.height = Math.floor(video.videoHeight * scale);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const img = canvas.toDataURL("image/jpeg", 0.92);
@@ -242,19 +255,24 @@
       .then(d => {
         capturedResult.src = d.captured_image || "";
         pipelineResult.src = d.pipeline_image || "";
+        biggestRectResult.src = d.biggest_rect_image || "";
         croppedResult.src = d.cropped_image || "";
+        outputSection.classList.remove("hidden");
       })
-      .catch(console.error);
+      .catch(err => {
+        alert("Capture failed. Try again.");
+        console.error(err);
+      });
   }
 
   startCamera();
 </script>
 
 </body>
-</html> -->
+</html>
 
 
-
+<!-- 
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -523,4 +541,4 @@
 
 </body>
 </html>
-
+ -->
