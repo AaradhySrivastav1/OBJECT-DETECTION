@@ -13,23 +13,9 @@
       --muted: #555;
     }
 
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
-
-    #wrap {
-      position: relative;
-      width: var(--w);
-      max-width: 100%;
-    }
-
-    #video {
-      width: 100%;
-      display: block;
-      border-radius: 8px;
-      background: #000;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #wrap { position: relative; width: var(--w); max-width: 100%; }
+    #video { width: 100%; display: block; border-radius: 8px; background: #000; }
 
     #box {
       position: absolute;
@@ -38,42 +24,14 @@
       pointer-events: none;
       transition: border-color 140ms ease;
     }
+    #box.detected { border-color: var(--green); }
 
-    #box.detected {
-      border-color: var(--green);
-    }
+    #status { margin-top: 8px; min-height: 22px; color: var(--muted); font-size: 18px; }
+    #controls { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    button { padding: 8px 12px; border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer; }
+    #captureBtn:disabled, #captureEditBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    #status {
-      margin-top: 8px;
-      min-height: 22px;
-      color: var(--muted);
-      font-size: 18px;
-    }
-
-    #controls {
-      margin-top: 10px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    button {
-      padding: 8px 12px;
-      border: 1px solid #ccc;
-      background: #fff;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-
-    #captureBtn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .output-grid.hidden {
-      display: none;
-    }
-
+    .output-grid.hidden { display: none; }
     .output-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -81,12 +39,7 @@
       margin-top: 14px;
       max-width: 1000px;
     }
-
-    .output-card {
-      font-size: 14px;
-      color: #333;
-    }
-
+    .output-card { font-size: 14px; color: #333; }
     .output-card img {
       width: 100%;
       max-width: var(--w);
@@ -98,6 +51,33 @@
       min-height: 120px;
       object-fit: contain;
     }
+
+    #editorModal.hidden { display: none; }
+    #editorModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.72);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+    #editorCard {
+      background: #fff;
+      border-radius: 8px;
+      width: min(95vw, 560px);
+      padding: 10px;
+    }
+    #editorTitle { font-size: 16px; margin-bottom: 8px; }
+    #editorCanvas {
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      touch-action: none;
+      background: #111;
+    }
+    #editorActions { display: flex; gap: 8px; margin-top: 10px; }
   </style>
 </head>
 
@@ -113,31 +93,28 @@
 <div id="status">Searching for document inside red box…</div>
 
 <div id="controls">
-  <button id="captureBtn" onclick="capture()" disabled>Capture</button>
-  <button onclick="capture(true)">Capture Anyway</button>
+  <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
+  <button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
+  <button onclick="capture(false, true)">Capture Anyway</button>
 </div>
 
 <canvas id="canvas" style="display:none"></canvas>
 
 <div id="outputSection" class="output-grid hidden">
-  <div class="output-card">
-    1) Captured Image (Inside Red Box)
-    <img id="capturedResult" />
-  </div>
+  <div class="output-card">1) Captured Image<img id="capturedResult"></div>
+  <div class="output-card">2) Pipeline Result<img id="pipelineResult"></div>
+  <div class="output-card">3) Biggest Rectangle<img id="biggestRectResult"></div>
+  <div class="output-card">4) Final Crop<img id="croppedResult"></div>
+</div>
 
-  <div class="output-card">
-    2) Edge + CamScanner Final (Before Crop)
-    <img id="pipelineResult" />
-  </div>
-
-  <div class="output-card">
-    3) Biggest Rectangle Only (Before Crop)
-    <img id="biggestRectResult" />
-  </div>
-
-  <div class="output-card">
-    4) Cropped Image (Final Output)
-    <img id="croppedResult" />
+<div id="editorModal" class="hidden">
+  <div id="editorCard">
+    <div id="editorTitle">Adjust corners manually</div>
+    <canvas id="editorCanvas"></canvas>
+    <div id="editorActions">
+      <button onclick="cancelEditor()">Cancel</button>
+      <button onclick="applyManualCrop()">Apply</button>
+    </div>
   </div>
 </div>
 
@@ -147,6 +124,7 @@
   const box = document.getElementById("box");
   const statusText = document.getElementById("status");
   const captureBtn = document.getElementById("captureBtn");
+  const captureEditBtn = document.getElementById("captureEditBtn");
   const capturedResult = document.getElementById("capturedResult");
   const pipelineResult = document.getElementById("pipelineResult");
   const biggestRectResult = document.getElementById("biggestRectResult");
@@ -154,118 +132,123 @@
   const canvas = document.getElementById("canvas");
   const outputSection = document.getElementById("outputSection");
 
+  const editorModal = document.getElementById("editorModal");
+  const editorCanvas = document.getElementById("editorCanvas");
+  const editorCtx = editorCanvas.getContext("2d");
+
   const OMR_RATIO = 26.5 / 21.5;
   const BOX_WIDTH_RATIO = 0.84;
 
   let detectBusy = false;
+  let editorImage = new Image();
+  let editorImageDataUrl = "";
+  let editorPoints = [];
+  let draggingIdx = -1;
+  let scaleX = 1, scaleY = 1;
 
   async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false
-      });
-      video.srcObject = stream;
-    } catch (err) {
-      console.error(err);
-      statusText.textContent =
-        "Camera access failed. Please allow camera permission.";
-    }
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:"environment"}}, audio:false });
+    video.srcObject = stream;
   }
 
   function updateBoundingBox() {
-    const w = video.clientWidth;
-    const h = video.clientHeight;
+    const w = video.clientWidth, h = video.clientHeight;
     if (!w || !h) return;
-
     wrap.style.height = `${h}px`;
-
-    const maxW = h / OMR_RATIO;
-    const bw = Math.min(w * BOX_WIDTH_RATIO, maxW);
+    const bw = Math.min(w * BOX_WIDTH_RATIO, h / OMR_RATIO);
     const bh = bw * OMR_RATIO;
-
-    box.style.width = `${bw}px`;
-    box.style.height = `${bh}px`;
-    box.style.left = `${(w - bw) / 2}px`;
-    box.style.top = `${(h - bh) / 2}px`;
+    box.style.cssText = `width:${bw}px;height:${bh}px;left:${(w-bw)/2}px;top:${(h-bh)/2}px`;
   }
 
   video.addEventListener("loadedmetadata", () => {
     updateBoundingBox();
     setInterval(updateDetectionState, 180);
   });
-
   window.addEventListener("resize", updateBoundingBox);
 
   async function updateDetectionState() {
-    if (detectBusy || !video.videoWidth || !video.videoHeight) return;
+    if (detectBusy) return;
     detectBusy = true;
 
-    try {
-      const ctx = canvas.getContext("2d");
-      const scale = Math.min(1, 640 / video.videoWidth);
-
-      canvas.width = Math.floor(video.videoWidth * scale);
-      canvas.height = Math.floor(video.videoHeight * scale);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const img = canvas.toDataURL("image/jpeg", 0.7);
-
-      const res = await fetch("/detect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ img })
-      });
-
-      if (!res.ok) return;
-
-      const data = await res.json();
-      box.classList.toggle("detected", data.detected);
-      captureBtn.disabled = !data.can_capture;
-
-      statusText.textContent = data.detected
-        ? "Document detected inside box ✓"
-        : "Searching for document inside red box…";
-    } catch (err) {
-      console.error("detect error", err);
-    } finally {
-      detectBusy = false;
-    }
-  }
-
-  function capture(force = false) {
-    if (!force && captureBtn.disabled) return;
-    if (!video.videoWidth || !video.videoHeight) return;
-
     const ctx = canvas.getContext("2d");
-    const scale = Math.min(1, 1280 / video.videoWidth);
-
-    canvas.width = Math.floor(video.videoWidth * scale);
-    canvas.height = Math.floor(video.videoHeight * scale);
+    const scale = Math.min(1, 640 / video.videoWidth);
+    canvas.width = video.videoWidth * scale;
+    canvas.height = video.videoHeight * scale;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const img = canvas.toDataURL("image/jpeg", 0.92);
+    const res = await fetch("/detect", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ img: canvas.toDataURL("image/jpeg",0.7) })
+    });
 
-    fetch("/process", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ img })
-    })
-      .then(r => {
-        if (!r.ok) throw new Error("server error");
-        return r.json();
-      })
-      .then(d => {
-        capturedResult.src = d.captured_image || "";
-        pipelineResult.src = d.pipeline_image || "";
-        biggestRectResult.src = d.biggest_rect_image || "";
-        croppedResult.src = d.cropped_image || "";
-        outputSection.classList.remove("hidden");
-      })
-      .catch(err => {
-        alert("Capture failed. Try again.");
-        console.error(err);
-      });
+    if (res.ok) {
+      const d = await res.json();
+      box.classList.toggle("detected", d.detected);
+      captureBtn.disabled = captureEditBtn.disabled = !d.can_capture;
+      statusText.textContent = d.detected ? "Document detected ✓" : "Searching for document…";
+    }
+    detectBusy = false;
+  }
+
+  function capture(openEditor=false, force=false) {
+    if (!force && captureBtn.disabled) return;
+    const ctx = canvas.getContext("2d");
+    const scale = Math.min(1, 1280 / video.videoWidth);
+    canvas.width = video.videoWidth * scale;
+    canvas.height = video.videoHeight * scale;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const img = canvas.toDataURL("image/jpeg",0.92);
+    openEditor ? prepareEditor(img) : processAuto(img);
+  }
+
+  function processAuto(img) {
+    fetch("/process",{method:"POST",headers:{ "Content-Type":"application/json"},body:JSON.stringify({img})})
+      .then(r=>r.json()).then(renderOutputs);
+  }
+
+  function renderOutputs(p) {
+    capturedResult.src = p.captured_image||"";
+    pipelineResult.src = p.pipeline_image||"";
+    biggestRectResult.src = p.biggest_rect_image||"";
+    croppedResult.src = p.cropped_image||"";
+    outputSection.classList.remove("hidden");
+  }
+
+  async function prepareEditor(img) {
+    const r = await fetch("/prepare",{method:"POST",headers:{ "Content-Type":"application/json"},body:JSON.stringify({img})});
+    const d = await r.json();
+    editorImageDataUrl = d.editor_image;
+    editorImage.onload = () => {
+      const scale = Math.min(520/editorImage.width,1);
+      editorCanvas.width = editorImage.width*scale;
+      editorCanvas.height = editorImage.height*scale;
+      scaleX = editorImage.width/editorCanvas.width;
+      scaleY = editorImage.height/editorCanvas.height;
+      editorPoints = d.quad.map(p=>({x:p[0]/scaleX,y:p[1]/scaleY}));
+      editorModal.classList.remove("hidden");
+      drawEditor();
+    };
+    editorImage.src = editorImageDataUrl;
+  }
+
+  function drawEditor() {
+    editorCtx.drawImage(editorImage,0,0,editorCanvas.width,editorCanvas.height);
+    editorCtx.strokeStyle="#0f6"; editorCtx.lineWidth=3;
+    editorCtx.beginPath();
+    editorPoints.forEach((p,i)=>i?editorCtx.lineTo(p.x,p.y):editorCtx.moveTo(p.x,p.y));
+    editorCtx.closePath(); editorCtx.stroke();
+    editorCtx.fillStyle="#f33";
+    editorPoints.forEach(p=>{editorCtx.beginPath();editorCtx.arc(p.x,p.y,8,0,Math.PI*2);editorCtx.fill();});
+  }
+
+  function cancelEditor(){ editorModal.classList.add("hidden"); }
+
+  async function applyManualCrop(){
+    const pts = editorPoints.map(p=>[p.x*scaleX,p.y*scaleY]);
+    const r = await fetch("/process_manual",{method:"POST",headers:{ "Content-Type":"application/json"},body:JSON.stringify({img:editorImageDataUrl,points:pts})});
+    renderOutputs(await r.json());
+    cancelEditor();
   }
 
   startCamera();
