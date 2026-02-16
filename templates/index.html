@@ -87,26 +87,25 @@
       max-width: var(--w);
       border: 1px solid #ddd;
       border-radius: 6px;
+      margin-top: 6px;
       background: #f7f7f7;
-      min-height: 120px;
       object-fit: contain;
     }
 
-    /* -------- Manual Editor -------- */
-
-    #editorModal.hidden {
-      display: none;
-    }
+    /* ---------- Manual Editor ---------- */
 
     #editorModal {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.72);
+      background: rgba(0,0,0,0.72);
       z-index: 999;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
-      padding: 10px;
+    }
+
+    #editorModal.show {
+      display: flex;
     }
 
     #editorCard {
@@ -121,6 +120,7 @@
       border: 1px solid #ddd;
       border-radius: 6px;
       background: #111;
+      touch-action: none;
       cursor: crosshair;
     }
 
@@ -149,195 +149,171 @@
   <button onclick="capture(false, true)">Capture Anyway</button>
 </div>
 
-<canvas id="canvas" style="display:none"></canvas>
+<canvas id="canvas" hidden></canvas>
 
 <div id="outputSection" class="output-grid hidden">
-  <div class="output-card">
-    <b>Captured</b>
-    <img id="capturedResult" />
-  </div>
-  <div class="output-card">
-    <b>Pipeline</b>
-    <img id="pipelineResult" />
-  </div>
-  <div class="output-card">
-    <b>Biggest Rectangle</b>
-    <img id="biggestRectResult" />
-  </div>
-  <div class="output-card">
-    <b>Final Crop</b>
-    <img id="croppedResult" />
-  </div>
+  <div class="output-card">Captured <img id="capturedResult"></div>
+  <div class="output-card">Pipeline <img id="pipelineResult"></div>
+  <div class="output-card">Biggest Rect <img id="biggestRectResult"></div>
+  <div class="output-card">Final Crop <img id="croppedResult"></div>
 </div>
 
 <!-- Manual Editor -->
-<div id="editorModal" class="hidden">
+<div id="editorModal">
   <div id="editorCard">
-    <b>Adjust corners & Apply</b>
+    <div>Adjust corners and Apply</div>
     <canvas id="editorCanvas"></canvas>
     <div id="editorActions">
-      <button onclick="cancelEditor()">Cancel</button>
-      <button onclick="applyManualCrop()">Apply</button>
+      <button onclick="closeEditor()">Cancel</button>
+      <button onclick="applyManual()">Apply</button>
     </div>
   </div>
 </div>
 
 <script>
-/* =================== CAMERA =================== */
-
 const video = document.getElementById("video");
 const box = document.getElementById("box");
 const statusText = document.getElementById("status");
-const canvas = document.getElementById("canvas");
-
 const captureBtn = document.getElementById("captureBtn");
 const captureEditBtn = document.getElementById("captureEditBtn");
+const canvas = document.getElementById("canvas");
 
-const capturedResult = document.getElementById("capturedResult");
-const pipelineResult = document.getElementById("pipelineResult");
-const biggestRectResult = document.getElementById("biggestRectResult");
-const croppedResult = document.getElementById("croppedResult");
-const outputSection = document.getElementById("outputSection");
-
-/* Editor */
 const editorModal = document.getElementById("editorModal");
 const editorCanvas = document.getElementById("editorCanvas");
-const editorCtx = editorCanvas.getContext("2d");
+const ectx = editorCanvas.getContext("2d");
 
 const OMR_RATIO = 26.5 / 21.5;
 const BOX_WIDTH_RATIO = 0.84;
 
-let editorImage = new Image();
-let editorPoints = [];
-let dragging = -1;
-let scaleX = 1, scaleY = 1;
-
-/* =================== START CAMERA =================== */
+let detectBusy = false;
+let img = new Image();
+let points = [];
+let drag = -1;
+let sx = 1, sy = 1;
 
 navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-  .then(stream => video.srcObject = stream);
+  .then(s => video.srcObject = s);
 
-/* =================== DETECTION =================== */
-
-video.addEventListener("loadedmetadata", () => {
+video.onloadedmetadata = () => {
   updateBox();
-  setInterval(detectFrame, 180);
-});
+  setInterval(detectLoop, 200);
+};
+
+window.onresize = updateBox;
 
 function updateBox() {
   const w = video.clientWidth;
   const h = video.clientHeight;
   const bw = Math.min(w * BOX_WIDTH_RATIO, h / OMR_RATIO);
   const bh = bw * OMR_RATIO;
-
   box.style.width = bw + "px";
   box.style.height = bh + "px";
   box.style.left = (w - bw) / 2 + "px";
   box.style.top = (h - bh) / 2 + "px";
 }
 
-async function detectFrame() {
-  if (!video.videoWidth) return;
+async function detectLoop() {
+  if (detectBusy || !video.videoWidth) return;
+  detectBusy = true;
 
   canvas.width = 640;
-  canvas.height = video.videoHeight * (640 / video.videoWidth);
-  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.height = 480;
+  canvas.getContext("2d").drawImage(video, 0, 0, 640, 480);
 
   const res = await fetch("/detect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img: canvas.toDataURL("image/jpeg", 0.7) })
+    body: JSON.stringify({ img: canvas.toDataURL("image/jpeg",0.7) })
   });
 
-  if (!res.ok) return;
-
-  const { detected, can_capture } = await res.json();
-  box.classList.toggle("detected", detected);
-  statusText.textContent = detected ? "Document detected ✓" : "Searching for document…";
-  captureBtn.disabled = captureEditBtn.disabled = !can_capture;
+  if (res.ok) {
+    const d = await res.json();
+    box.classList.toggle("detected", d.detected);
+    captureBtn.disabled = captureEditBtn.disabled = !d.can_capture;
+    statusText.textContent = d.detected ? "Detected ✓" : "Searching…";
+  }
+  detectBusy = false;
 }
 
-/* =================== CAPTURE =================== */
-
-function capture(openEditor = false, force = false) {
+function capture(edit=false, force=false) {
   if (!force && captureBtn.disabled) return;
-
-  canvas.width = 1280;
-  canvas.height = video.videoHeight * (1280 / video.videoWidth);
-  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-  const img = canvas.toDataURL("image/jpeg", 0.92);
-
-  openEditor ? openManualEditor(img) : processAuto(img);
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video,0,0);
+  const data = canvas.toDataURL("image/jpeg",0.9);
+  edit ? openEditor(data) : sendAuto(data);
 }
 
-function processAuto(img) {
+function sendAuto(data) {
   fetch("/process", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img })
-  })
-  .then(r => r.json())
-  .then(renderOutputs);
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({img:data})
+  }).then(r=>r.json()).then(showOutput);
 }
 
-function renderOutputs(p) {
-  capturedResult.src = p.captured_image;
-  pipelineResult.src = p.pipeline_image;
-  biggestRectResult.src = p.biggest_rect_image;
-  croppedResult.src = p.cropped_image;
-  outputSection.classList.remove("hidden");
+function showOutput(p) {
+  document.getElementById("capturedResult").src = p.captured_image;
+  document.getElementById("pipelineResult").src = p.pipeline_image;
+  document.getElementById("biggestRectResult").src = p.biggest_rect_image;
+  document.getElementById("croppedResult").src = p.cropped_image;
+  document.getElementById("outputSection").classList.remove("hidden");
 }
 
-/* =================== MANUAL EDITOR =================== */
+/* -------- Manual Editor -------- */
 
-function openManualEditor(img) {
-  fetch("/prepare", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img })
-  })
-  .then(r => r.json())
-  .then(({ editor_image, quad }) => {
-    editorImage.onload = () => {
-      editorCanvas.width = editorImage.width * 0.5;
-      editorCanvas.height = editorImage.height * 0.5;
-      scaleX = editorImage.width / editorCanvas.width;
-      scaleY = editorImage.height / editorCanvas.height;
-      editorPoints = quad.map(p => ({ x: p[0]/scaleX, y: p[1]/scaleY }));
-      drawEditor();
-      editorModal.classList.remove("hidden");
-    };
-    editorImage.src = editor_image;
+async function openEditor(data) {
+  const r = await fetch("/prepare", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({img:data})
   });
+  const j = await r.json();
+  img.src = j.editor_image;
+  img.onload = () => {
+    editorCanvas.width = img.width * 0.7;
+    editorCanvas.height = img.height * 0.7;
+    sx = img.width / editorCanvas.width;
+    sy = img.height / editorCanvas.height;
+    points = j.quad.map(p=>({x:p[0]/sx,y:p[1]/sy}));
+    editorModal.classList.add("show");
+    drawEditor();
+  };
 }
 
 function drawEditor() {
-  editorCtx.drawImage(editorImage, 0, 0, editorCanvas.width, editorCanvas.height);
-  editorCtx.strokeStyle = "#00ff66";
-  editorCtx.beginPath();
-  editorPoints.forEach((p,i)=> i?editorCtx.lineTo(p.x,p.y):editorCtx.moveTo(p.x,p.y));
-  editorCtx.closePath();
-  editorCtx.stroke();
+  ectx.drawImage(img,0,0,editorCanvas.width,editorCanvas.height);
+  ectx.strokeStyle="#00ff66";
+  ectx.lineWidth=3;
+  ectx.beginPath();
+  points.forEach((p,i)=> i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y));
+  ectx.closePath(); ectx.stroke();
 }
 
-function cancelEditor() {
-  editorModal.classList.add("hidden");
-}
+editorCanvas.onpointerdown=e=>{
+  const r=editorCanvas.getBoundingClientRect();
+  const x=e.clientX-r.left,y=e.clientY-r.top;
+  points.forEach((p,i)=>{ if(Math.hypot(p.x-x,p.y-y)<20) drag=i; });
+};
+editorCanvas.onpointermove=e=>{
+  if(drag<0) return;
+  const r=editorCanvas.getBoundingClientRect();
+  points[drag]={x:e.clientX-r.left,y:e.clientY-r.top};
+  drawEditor();
+};
+editorCanvas.onpointerup=()=>drag=-1;
 
-function applyManualCrop() {
-  fetch("/process_manual", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      img: editorImage.src,
-      points: editorPoints.map(p=>[p.x*scaleX,p.y*scaleY])
-    })
-  })
-  .then(r=>r.json())
-  .then(p=>{
-    renderOutputs(p);
-    cancelEditor();
+function closeEditor(){ editorModal.classList.remove("show"); }
+
+async function applyManual() {
+  const pts = points.map(p=>[p.x*sx,p.y*sy]);
+  const r = await fetch("/process_manual",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({ img: img.src, points: pts })
   });
+  showOutput(await r.json());
+  closeEditor();
 }
 </script>
 
