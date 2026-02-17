@@ -13,50 +13,23 @@
       --muted: #555;
     }
 
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
 
-    #wrap {
-      position: relative;
-      width: var(--w);
-      max-width: 100%;
-    }
-
-    #video {
-      width: 100%;
-      display: block;
-      border-radius: 8px;
-      background: #000;
-    }
+    #wrap { position: relative; width: var(--w); max-width: 100%; }
+    #video { width: 100%; border-radius: 8px; background: #000; }
 
     #box {
       position: absolute;
       border: 3px solid var(--red);
       border-radius: 8px;
       pointer-events: none;
-      transition: border-color 140ms ease;
+      transition: border-color 0.15s ease;
     }
+    #box.detected { border-color: var(--green); }
 
-    #box.detected {
-      border-color: var(--green);
-    }
+    #status { margin-top: 8px; min-height: 22px; color: var(--muted); font-size: 18px; }
 
-    #status {
-      margin-top: 8px;
-      min-height: 22px;
-      color: var(--muted);
-      font-size: 18px;
-    }
-
-    #controls {
-      margin-top: 10px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
+    #controls { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
     button {
       padding: 8px 12px;
       border: 1px solid #ccc;
@@ -64,22 +37,14 @@
       border-radius: 6px;
       cursor: pointer;
     }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .output-grid.hidden {
-      display: none;
-    }
-
+    .output-grid.hidden { display: none; }
     .output-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 12px;
       margin-top: 14px;
-      max-width: 1000px;
     }
 
     .output-card img {
@@ -87,26 +52,21 @@
       max-width: var(--w);
       border: 1px solid #ddd;
       border-radius: 6px;
-      margin-top: 6px;
       background: #f7f7f7;
       object-fit: contain;
     }
 
     /* -------- Manual Editor -------- */
 
+    #editorModal.hidden { display: none; }
     #editorModal {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.72);
-      z-index: 999;
-      display: none;
+      background: rgba(0,0,0,0.72);
+      display: flex;
       align-items: center;
       justify-content: center;
-      padding: 10px;
-    }
-
-    #editorModal.show {
-      display: flex;
+      z-index: 999;
     }
 
     #editorCard {
@@ -125,11 +85,7 @@
       cursor: crosshair;
     }
 
-    #editorActions {
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
-    }
+    #editorActions { display: flex; gap: 8px; margin-top: 10px; }
   </style>
 </head>
 
@@ -147,27 +103,26 @@
 <div id="controls">
   <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
   <button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
-  <button onclick="capture(false, true)">Capture Anyway</button>
+  <button onclick="capture(false,true)">Capture Anyway</button>
   <button onclick="captureWithOpenCvGui()">Capture + OpenCV ROI</button>
 </div>
 
 <canvas id="canvas" hidden></canvas>
 
 <div id="outputSection" class="output-grid hidden">
-  <div class="output-card">Captured <img id="capturedResult"></div>
-  <div class="output-card">Pipeline <img id="pipelineResult"></div>
-  <div class="output-card">Biggest Rect <img id="biggestRectResult"></div>
-  <div class="output-card">Final Crop <img id="croppedResult"></div>
+  <div class="output-card">Captured<img id="capturedResult"></div>
+  <div class="output-card">Pipeline<img id="pipelineResult"></div>
+  <div class="output-card">Biggest Rect<img id="biggestRectResult"></div>
+  <div class="output-card">Final Crop<img id="croppedResult"></div>
 </div>
 
-<!-- Manual Editor -->
-<div id="editorModal">
+<div id="editorModal" class="hidden">
   <div id="editorCard">
-    <div>Adjust corners manually and Apply</div>
+    <div>Drag 4 red points → Apply</div>
     <canvas id="editorCanvas"></canvas>
     <div id="editorActions">
-      <button onclick="closeEditor()">Cancel</button>
-      <button onclick="applyManual()">Apply</button>
+      <button onclick="cancelEditor()">Cancel</button>
+      <button onclick="applyManualCrop()">Apply</button>
     </div>
   </div>
 </div>
@@ -187,94 +142,93 @@ const ectx = editorCanvas.getContext("2d");
 const OMR_RATIO = 26.5 / 21.5;
 const BOX_WIDTH_RATIO = 0.84;
 
-let detectBusy = false;
+let busy = false;
 let img = new Image();
 let points = [];
 let drag = -1;
 let sx = 1, sy = 1;
 
-/* ---------- Camera ---------- */
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+/* Camera */
+navigator.mediaDevices.getUserMedia({ video:{facingMode:"environment"} })
   .then(s => video.srcObject = s);
 
 video.onloadedmetadata = () => {
-  updateBox();
-  setInterval(detectLoop, 180);
+  resizeBox();
+  setInterval(detectLoop,180);
 };
 
-window.onresize = updateBox;
+window.onresize = resizeBox;
 
-function updateBox() {
-  const w = video.clientWidth;
-  const h = video.clientHeight;
+function resizeBox(){
+  const w = video.clientWidth, h = video.clientHeight;
   const bw = Math.min(w * BOX_WIDTH_RATIO, h / OMR_RATIO);
   const bh = bw * OMR_RATIO;
-  box.style.width = bw + "px";
-  box.style.height = bh + "px";
-  box.style.left = (w - bw) / 2 + "px";
-  box.style.top = (h - bh) / 2 + "px";
+  box.style.width = bw+"px";
+  box.style.height = bh+"px";
+  box.style.left = (w-bw)/2+"px";
+  box.style.top = (h-bh)/2+"px";
 }
 
-/* ---------- Detect ---------- */
-async function detectLoop() {
-  if (detectBusy || !video.videoWidth) return;
-  detectBusy = true;
+/* Detect */
+async function detectLoop(){
+  if(busy || !video.videoWidth) return;
+  busy = true;
 
   canvas.width = 640;
   canvas.height = 480;
-  canvas.getContext("2d").drawImage(video, 0, 0, 640, 480);
+  canvas.getContext("2d").drawImage(video,0,0,640,480);
 
-  const res = await fetch("/detect", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img: canvas.toDataURL("image/jpeg",0.7) })
+  const r = await fetch("/detect",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({img:canvas.toDataURL("image/jpeg",0.7)})
   });
 
-  if (res.ok) {
-    const d = await res.json();
+  if(r.ok){
+    const d = await r.json();
     box.classList.toggle("detected", d.detected);
     captureBtn.disabled = captureEditBtn.disabled = !d.can_capture;
     statusText.textContent = d.detected ? "Document detected ✓" : "Searching for document…";
   }
-  detectBusy = false;
+  busy = false;
 }
 
-/* ---------- Capture ---------- */
-function capture(edit=false, force=false) {
-  if (!force && captureBtn.disabled) return;
+/* Capture */
+function capture(edit=false, force=false){
+  if(!force && captureBtn.disabled) return;
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video,0,0);
   const data = canvas.toDataURL("image/jpeg",0.92);
-  edit ? openEditor(data) : sendAuto(data);
+  edit ? openEditor(data) : sendAuto(data,false);
 }
 
-function captureWithOpenCvGui() {
+function captureWithOpenCvGui(){
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video,0,0);
-  sendAuto(canvas.toDataURL("image/jpeg",0.92), true);
+  sendAuto(canvas.toDataURL("image/jpeg",0.92),true);
 }
 
-function sendAuto(data, manual_gui=false) {
-  fetch("/process", {
+function sendAuto(data, manual_gui){
+  fetch("/process",{
     method:"POST",
     headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({ img:data, manual_gui })
-  }).then(r=>r.json()).then(showOutput);
+    body:JSON.stringify({img:data, manual_gui})
+  }).then(r=>r.json()).then(show);
 }
 
-function showOutput(p) {
-  document.getElementById("capturedResult").src = p.captured_image;
-  document.getElementById("pipelineResult").src = p.pipeline_image;
-  document.getElementById("biggestRectResult").src = p.biggest_rect_image;
-  document.getElementById("croppedResult").src = p.cropped_image;
-  document.getElementById("outputSection").classList.remove("hidden");
+function show(p){
+  capturedResult.src = p.captured_image;
+  pipelineResult.src = p.pipeline_image;
+  biggestRectResult.src = p.biggest_rect_image;
+  croppedResult.src = p.cropped_image;
+  outputSection.classList.remove("hidden");
 }
 
-/* ---------- Manual Editor ---------- */
-async function openEditor(data) {
-  const r = await fetch("/prepare", {
+/* Manual Editor */
+async function openEditor(data){
+  const r = await fetch("/prepare",{
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body:JSON.stringify({img:data})
@@ -283,50 +237,59 @@ async function openEditor(data) {
   img.src = j.editor_image;
 
   img.onload = () => {
-    const scale = Math.min(520 / img.width, 1);
-    editorCanvas.width = img.width * scale;
-    editorCanvas.height = img.height * scale;
-    sx = img.width / editorCanvas.width;
-    sy = img.height / editorCanvas.height;
+    const scale = Math.min(520/img.width,1);
+    editorCanvas.width = img.width*scale;
+    editorCanvas.height = img.height*scale;
+    sx = img.width/editorCanvas.width;
+    sy = img.height/editorCanvas.height;
     points = j.quad.map(p=>({x:p[0]/sx,y:p[1]/sy}));
-    editorModal.classList.add("show");
-    drawEditor();
+    editorModal.classList.remove("hidden");
+    draw();
   };
 }
 
-function drawEditor() {
+function draw(){
   ectx.drawImage(img,0,0,editorCanvas.width,editorCanvas.height);
   ectx.strokeStyle="#00ff66";
   ectx.lineWidth=3;
   ectx.beginPath();
-  points.forEach((p,i)=> i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y));
+  points.forEach((p,i)=>i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y));
   ectx.closePath(); ectx.stroke();
+
+  points.forEach((p,i)=>{
+    ectx.beginPath();
+    ectx.arc(p.x,p.y,18,0,Math.PI*2);
+    ectx.fillStyle="#ff3b30";
+    ectx.fill();
+    ectx.fillStyle="#fff";
+    ectx.fillText(i+1,p.x,p.y+4);
+  });
 }
 
 editorCanvas.onpointerdown=e=>{
   const r=editorCanvas.getBoundingClientRect();
-  const x=e.clientX-r.left,y=e.clientY-r.top;
-  points.forEach((p,i)=>{ if(Math.hypot(p.x-x,p.y-y)<20) drag=i; });
+  const x=e.clientX-r.left, y=e.clientY-r.top;
+  points.forEach((p,i)=>{ if(Math.hypot(p.x-x,p.y-y)<30) drag=i; });
 };
 editorCanvas.onpointermove=e=>{
   if(drag<0) return;
   const r=editorCanvas.getBoundingClientRect();
   points[drag]={x:e.clientX-r.left,y:e.clientY-r.top};
-  drawEditor();
+  draw();
 };
 editorCanvas.onpointerup=()=>drag=-1;
 
-function closeEditor(){ editorModal.classList.remove("show"); }
+function cancelEditor(){ editorModal.classList.add("hidden"); }
 
-async function applyManual() {
+async function applyManualCrop(){
   const pts = points.map(p=>[p.x*sx,p.y*sy]);
   const r = await fetch("/process_manual",{
     method:"POST",
     headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({ img: img.src, points: pts })
+    body:JSON.stringify({img:img.src, points:pts})
   });
-  showOutput(await r.json());
-  closeEditor();
+  show(await r.json());
+  cancelEditor();
 }
 </script>
 
