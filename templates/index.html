@@ -92,16 +92,17 @@
       object-fit: contain;
     }
 
-    /* ---------- Manual Editor ---------- */
+    /* -------- Manual Editor -------- */
 
     #editorModal {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.72);
+      background: rgba(0, 0, 0, 0.72);
       z-index: 999;
       display: none;
       align-items: center;
       justify-content: center;
+      padding: 10px;
     }
 
     #editorModal.show {
@@ -147,6 +148,7 @@
   <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
   <button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
   <button onclick="capture(false, true)">Capture Anyway</button>
+  <button onclick="captureWithOpenCvGui()">Capture + OpenCV ROI</button>
 </div>
 
 <canvas id="canvas" hidden></canvas>
@@ -161,7 +163,7 @@
 <!-- Manual Editor -->
 <div id="editorModal">
   <div id="editorCard">
-    <div>Adjust corners and Apply</div>
+    <div>Adjust corners manually and Apply</div>
     <canvas id="editorCanvas"></canvas>
     <div id="editorActions">
       <button onclick="closeEditor()">Cancel</button>
@@ -191,12 +193,13 @@ let points = [];
 let drag = -1;
 let sx = 1, sy = 1;
 
+/* ---------- Camera ---------- */
 navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
   .then(s => video.srcObject = s);
 
 video.onloadedmetadata = () => {
   updateBox();
-  setInterval(detectLoop, 200);
+  setInterval(detectLoop, 180);
 };
 
 window.onresize = updateBox;
@@ -212,6 +215,7 @@ function updateBox() {
   box.style.top = (h - bh) / 2 + "px";
 }
 
+/* ---------- Detect ---------- */
 async function detectLoop() {
   if (detectBusy || !video.videoWidth) return;
   detectBusy = true;
@@ -230,25 +234,33 @@ async function detectLoop() {
     const d = await res.json();
     box.classList.toggle("detected", d.detected);
     captureBtn.disabled = captureEditBtn.disabled = !d.can_capture;
-    statusText.textContent = d.detected ? "Detected ✓" : "Searching…";
+    statusText.textContent = d.detected ? "Document detected ✓" : "Searching for document…";
   }
   detectBusy = false;
 }
 
+/* ---------- Capture ---------- */
 function capture(edit=false, force=false) {
   if (!force && captureBtn.disabled) return;
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video,0,0);
-  const data = canvas.toDataURL("image/jpeg",0.9);
+  const data = canvas.toDataURL("image/jpeg",0.92);
   edit ? openEditor(data) : sendAuto(data);
 }
 
-function sendAuto(data) {
+function captureWithOpenCvGui() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video,0,0);
+  sendAuto(canvas.toDataURL("image/jpeg",0.92), true);
+}
+
+function sendAuto(data, manual_gui=false) {
   fetch("/process", {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({img:data})
+    body:JSON.stringify({ img:data, manual_gui })
   }).then(r=>r.json()).then(showOutput);
 }
 
@@ -260,8 +272,7 @@ function showOutput(p) {
   document.getElementById("outputSection").classList.remove("hidden");
 }
 
-/* -------- Manual Editor -------- */
-
+/* ---------- Manual Editor ---------- */
 async function openEditor(data) {
   const r = await fetch("/prepare", {
     method:"POST",
@@ -270,9 +281,11 @@ async function openEditor(data) {
   });
   const j = await r.json();
   img.src = j.editor_image;
+
   img.onload = () => {
-    editorCanvas.width = img.width * 0.7;
-    editorCanvas.height = img.height * 0.7;
+    const scale = Math.min(520 / img.width, 1);
+    editorCanvas.width = img.width * scale;
+    editorCanvas.height = img.height * scale;
     sx = img.width / editorCanvas.width;
     sy = img.height / editorCanvas.height;
     points = j.quad.map(p=>({x:p[0]/sx,y:p[1]/sy}));
