@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -293,5 +293,338 @@ async function applyManualCrop(){
 }
 </script>
 
+</body>
+</html> -->
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMR Capture</title>
+
+  <style>
+    :root {
+      --w: 340px;
+      --red: #ff2d2d;
+      --green: #1fbf4c;
+      --muted: #555;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    #wrap {
+      position: relative;
+      width: var(--w);
+      max-width: 100%;
+    }
+
+    #video {
+      width: 100%;
+      display: block;
+      border-radius: 8px;
+      background: #000;
+    }
+
+    #box {
+      position: absolute;
+      border: 3px solid var(--red);
+      border-radius: 8px;
+      pointer-events: none;
+      transition: border-color 140ms ease;
+    }
+
+    #box.detected {
+      border-color: var(--green);
+    }
+
+    #status {
+      margin-top: 8px;
+      min-height: 22px;
+      font-size: 18px;
+      color: var(--muted);
+    }
+
+    #controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .output-grid.hidden {
+      display: none;
+    }
+
+    .output-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+      max-width: 1000px;
+    }
+
+    .output-card img {
+      width: 100%;
+      max-width: var(--w);
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #f7f7f7;
+      margin-top: 6px;
+    }
+
+    /* ---------- Manual Editor ---------- */
+
+    #editorModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+
+    #editorCard {
+      background: #fff;
+      border-radius: 8px;
+      padding: 10px;
+      width: min(95vw, 560px);
+    }
+
+    #editorCanvas {
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #111;
+      touch-action: none;
+    }
+
+    #editorActions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <h3>Place OMR inside frame</h3>
+
+  <div id="wrap">
+    <video id="video" autoplay playsinline></video>
+    <div id="box"></div>
+  </div>
+
+  <div id="status">Searching for document inside red box…</div>
+
+  <div id="controls">
+    <button id="captureBtn" disabled>Capture</button>
+    <button id="captureEditBtn" disabled>Capture + Edit</button>
+    <button id="forceCaptureBtn">Capture Anyway</button>
+    <button id="captureOpenCvBtn">Capture + OpenCV ROI</button>
+  </div>
+
+  <canvas id="canvas" hidden></canvas>
+
+  <div id="outputSection" class="output-grid hidden">
+    <div class="output-card">Captured <img id="capturedResult" /></div>
+    <div class="output-card">Pipeline <img id="pipelineResult" /></div>
+    <div class="output-card">Rectangle <img id="biggestRectResult" /></div>
+    <div class="output-card">Final <img id="croppedResult" /></div>
+  </div>
+
+  <div id="editorModal">
+    <div id="editorCard">
+      <b>Drag 4 red points → Apply</b>
+      <canvas id="editorCanvas"></canvas>
+      <div id="editorActions">
+        <button onclick="closeEditor()">Cancel</button>
+        <button onclick="applyManualCrop()">Apply</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ===================== BASIC CAMERA ===================== */
+const video = document.getElementById("video");
+const box = document.getElementById("box");
+const canvas = document.getElementById("canvas");
+const statusText = document.getElementById("status");
+
+const captureBtn = document.getElementById("captureBtn");
+const captureEditBtn = document.getElementById("captureEditBtn");
+
+const capturedResult = document.getElementById("capturedResult");
+const pipelineResult = document.getElementById("pipelineResult");
+const biggestRectResult = document.getElementById("biggestRectResult");
+const croppedResult = document.getElementById("croppedResult");
+
+const OMR_RATIO = 26.5 / 21.5;
+const BOX_WIDTH_RATIO = 0.84;
+
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { ideal: "environment" } }
+}).then(s => video.srcObject = s);
+
+/* ===================== BOX ===================== */
+video.addEventListener("loadedmetadata", () => {
+  resizeBox();
+  setInterval(detectLoop, 200);
+});
+
+window.addEventListener("resize", resizeBox);
+
+function resizeBox() {
+  const w = video.clientWidth;
+  const h = video.clientHeight;
+  const bw = Math.min(w * BOX_WIDTH_RATIO, h / OMR_RATIO);
+  const bh = bw * OMR_RATIO;
+
+  box.style.width = bw + "px";
+  box.style.height = bh + "px";
+  box.style.left = (w - bw) / 2 + "px";
+  box.style.top = (h - bh) / 2 + "px";
+}
+
+/* ===================== DETECTION ===================== */
+let busy = false;
+
+async function detectLoop() {
+  if (busy || !video.videoWidth) return;
+  busy = true;
+
+  canvas.width = 640;
+  canvas.height = 640 * video.videoHeight / video.videoWidth;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const res = await fetch("/detect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img: canvas.toDataURL("image/jpeg", 0.7) })
+  });
+
+  if (res.ok) {
+    const d = await res.json();
+    box.classList.toggle("detected", d.detected);
+    captureBtn.disabled = !d.can_capture;
+    captureEditBtn.disabled = !d.can_capture;
+    statusText.textContent = d.detected
+      ? "Document detected ✓"
+      : "Searching for document…";
+  }
+
+  busy = false;
+}
+
+/* ===================== CAPTURE ===================== */
+function grabFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+captureBtn.onclick = () => processAuto(grabFrame());
+captureEditBtn.onclick = () => openEditor(grabFrame());
+document.getElementById("forceCaptureBtn").onclick = () => processAuto(grabFrame());
+document.getElementById("captureOpenCvBtn").onclick = () =>
+  processAuto(grabFrame(), true);
+
+function processAuto(img, gui=false) {
+  fetch("/process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img, manual_gui: gui })
+  })
+  .then(r => r.json())
+  .then(showResult);
+}
+
+function showResult(p) {
+  capturedResult.src = p.captured_image;
+  pipelineResult.src = p.pipeline_image;
+  biggestRectResult.src = p.biggest_rect_image;
+  croppedResult.src = p.cropped_image;
+  document.getElementById("outputSection").classList.remove("hidden");
+}
+
+/* ===================== MANUAL EDITOR ===================== */
+const editorModal = document.getElementById("editorModal");
+const editorCanvas = document.getElementById("editorCanvas");
+const ectx = editorCanvas.getContext("2d");
+let points = [], imgObj = new Image();
+
+function openEditor(img) {
+  fetch("/prepare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img })
+  })
+  .then(r => r.json())
+  .then(d => {
+    imgObj.src = d.editor_image;
+    imgObj.onload = () => {
+      editorCanvas.width = imgObj.width;
+      editorCanvas.height = imgObj.height;
+      points = d.quad.map(p => ({x:p[0], y:p[1]}));
+      editorModal.style.display = "flex";
+      drawEditor();
+    };
+  });
+}
+
+function drawEditor() {
+  ectx.drawImage(imgObj, 0, 0);
+  ectx.strokeStyle = "#00ff66";
+  ectx.beginPath();
+  points.forEach((p,i)=> i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y));
+  ectx.closePath(); ectx.stroke();
+  points.forEach(p=>{
+    ectx.fillStyle="#ff3b30";
+    ectx.beginPath();
+    ectx.arc(p.x,p.y,12,0,Math.PI*2);
+    ectx.fill();
+  });
+}
+
+function closeEditor() {
+  editorModal.style.display = "none";
+}
+
+function applyManualCrop() {
+  fetch("/process_manual", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img: imgObj.src, points: points.map(p=>[p.x,p.y]) })
+  })
+  .then(r=>r.json())
+  .then(p=>{
+    showResult(p);
+    closeEditor();
+  });
+}
+</script>
 </body>
 </html>
