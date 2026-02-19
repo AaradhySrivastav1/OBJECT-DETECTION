@@ -465,7 +465,6 @@
 
 # if __name__ == "__main__":
 #     app.run(host="0.0.0.0", port=10000)
-
 from flask import Flask, render_template, request, jsonify
 import base64
 
@@ -895,11 +894,17 @@ def prepare():
     if quad is None:
         quad = _default_quad_for_image(roi)
 
+    h, w = img.shape[:2]
+    x1, y1, _, _ = _omr_box_coords(w, h)
+    quad_full = quad.copy()
+    quad_full[:, 0] += x1
+    quad_full[:, 1] += y1
+
     roi_url = _encode_image_data_url(roi, quality=92)
     if not roi_url:
         return "encode failed", 400
 
-    return jsonify({"editor_image": roi_url, "quad": quad.tolist()})
+    return jsonify({"editor_image": roi_url, "quad": quad.tolist(), "quad_full": quad_full.tolist()})
 
 
 @app.route("/process_manual", methods=["POST"])
