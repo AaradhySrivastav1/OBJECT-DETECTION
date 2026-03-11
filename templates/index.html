@@ -1,311 +1,256 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OMR Capture</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OMR Capture</title>
 
-  <style>
-    :root {
-      --red: #ff2d2d;
-      --green: #1fbf4c;
-    }
+<style>
+:root{
+  --w:340px;
+  --red:#ff2d2d;
+  --green:#1fbf4c;
+  --muted:#555;
+}
 
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
+body{
+  font-family:Arial,sans-serif;
+  margin:20px;
+}
 
-    #wrap {
-      position: relative;
-      width: 340px;
-      max-width: 100%;
-    }
+#wrap{
+  position:relative;
+  width:var(--w);
+  max-width:100%;
+}
 
-    video {
-      width: 100%;
-      border-radius: 8px;
-      background: #000;
-    }
+#video{
+  width:100%;
+  display:block;
+  border-radius:8px;
+  background:#000;
+}
 
-    #box {
-      position: absolute;
-      border: 3px solid var(--red);
-      border-radius: 8px;
-      pointer-events: none;
-    }
+#box{
+  position:absolute;
+  border:3px solid var(--red);
+  border-radius:8px;
+  pointer-events:none;
+  transition:border-color 140ms ease;
+}
 
-    #box.detected {
-      border-color: var(--green);
-    }
+#box.detected{
+  border-color:var(--green);
+}
 
-    #controls {
-      margin-top: 10px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+#status{
+  margin-top:8px;
+  min-height:22px;
+  color:var(--muted);
+  font-size:18px;
+}
 
-    button {
-      padding: 8px 12px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      cursor: pointer;
-    }
+#controls{
+  margin-top:10px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
 
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+button{
+  padding:8px 12px;
+  border:1px solid #ccc;
+  background:#fff;
+  border-radius:6px;
+  cursor:pointer;
+}
 
-    .grid {
-      display: none;
-      margin-top: 16px;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    }
+#captureBtn:disabled,
+#captureEditBtn:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+}
 
-    .grid.show {
-      display: grid;
-    }
+.output-grid.hidden{
+  display:none;
+}
 
-    img {
-      width: 100%;
-      border-radius: 6px;
-      border: 1px solid #ddd;
-    }
+.output-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:12px;
+  margin-top:14px;
+  max-width:1000px;
+}
 
-    #editorModal {
-      position: fixed;
-      inset: 0;
-      display: none;
-      background: rgba(0,0,0,.7);
-      align-items: center;
-      justify-content: center;
-      z-index: 999;
-    }
+.output-card img{
+  width:100%;
+  max-width:var(--w);
+  border:1px solid #ddd;
+  border-radius:6px;
+  display:block;
+  margin-top:6px;
+  background:#f7f7f7;
+  min-height:120px;
+  object-fit:contain;
+}
 
-    #editorCard {
-      background: #fff;
-      padding: 10px;
-      border-radius: 8px;
-      width: min(95vw, 520px);
-    }
+#editorModal.hidden{
+  display:none;
+}
 
-    #editorCanvas {
-      width: 100%;
-      background: #111;
-      border-radius: 6px;
-      touch-action: none;
-      cursor: crosshair;
-    }
-  </style>
+#editorModal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.72);
+  z-index:999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px;
+}
+
+#editorCard{
+  background:#fff;
+  border-radius:8px;
+  width:min(95vw,560px);
+  padding:10px;
+}
+
+#editorCanvas{
+  width:100%;
+  display:block;
+  border:1px solid #ddd;
+  border-radius:6px;
+  touch-action:none;
+  background:#111;
+  cursor:crosshair;
+}
+
+#editorActions{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+</style>
 </head>
 
 <body>
 
-<h3>Place OMR inside frame</h3>
+<h3>Document Scanner (OMR Sheet)</h3>
 
 <div id="wrap">
-  <video id="video" autoplay playsinline></video>
-  <div id="box"></div>
+<video id="video" autoplay playsinline></video>
+<div id="box"></div>
 </div>
 
-<p id="status">Searching for document…</p>
+<div id="status">Searching for document inside red box…</div>
 
 <div id="controls">
-  <button id="captureBtn" disabled>Capture</button>
-  <button id="editBtn" disabled>Capture + Edit</button>
-  <button id="forceBtn">Capture Anyway</button>
+<button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
+<button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
+<button onclick="capture(false,true)">Capture Anyway</button>
+<input id="uploadInput" type="file" accept="image/*">
 </div>
 
-<canvas id="canvas" hidden></canvas>
+<canvas id="canvas" style="display:none"></canvas>
 
-<div id="output" class="grid">
-  <img id="o1">
-  <img id="o2">
-  <img id="o3">
-  <img id="o4">
+<div id="outputSection" class="output-grid hidden">
+
+<div class="output-card">
+Detected Sheet
+<img id="capturedResult">
 </div>
 
-<div id="editorModal">
-  <div id="editorCard">
-    <p>Drag 4 points → Apply</p>
-    <canvas id="editorCanvas"></canvas><br>
-    <button onclick="closeEditor()">Cancel</button>
-    <button onclick="applyCrop()">Apply</button>
-  </div>
+<div class="output-card">
+Edge Detection
+<img id="pipelineResult">
+</div>
+
+<div class="output-card">
+Grayscale
+<img id="biggestRectResult">
+</div>
+
+<div class="output-card">
+Final Cropped
+<img id="croppedResult">
+</div>
+
+</div>
+
+<div id="editorModal" class="hidden">
+<div id="editorCard">
+
+<div>Drag the 4 red dots then press Apply</div>
+
+<canvas id="editorCanvas"></canvas>
+
+<div id="editorActions">
+<button onclick="cancelEditor()">Cancel</button>
+<button onclick="applyManualCrop()">Apply</button>
+</div>
+
+</div>
 </div>
 
 <script>
-const video = document.getElementById("video");
-const box = document.getElementById("box");
-const statusText = document.getElementById("status");
-const captureBtn = document.getElementById("captureBtn");
-const editBtn = document.getElementById("editBtn");
-const forceBtn = document.getElementById("forceBtn");
-const canvas = document.getElementById("canvas");
 
-const output = document.getElementById("output");
-const imgs = [...output.querySelectorAll("img")];
+const video=document.getElementById("video");
+const box=document.getElementById("box");
+const canvas=document.getElementById("canvas");
+const statusText=document.getElementById("status");
 
-const editorModal = document.getElementById("editorModal");
-const editorCanvas = document.getElementById("editorCanvas");
-const ectx = editorCanvas.getContext("2d");
+async function startCamera(){
 
-const OMR_RATIO = 26.5 / 21.5;
-let detectBusy = false;
+try{
 
-let editorImg = new Image();
-let points = [];
-let drag = -1;
-let sx = 1, sy = 1;
+const stream=await navigator.mediaDevices.getUserMedia({
+video:{facingMode:"environment"}
+});
 
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-  .then(s => video.srcObject = s);
+video.srcObject=stream;
 
-video.onloadedmetadata = () => {
-  resizeBox();
-  setInterval(detect, 200);
-};
-window.onresize = resizeBox;
+}catch(e){
 
-function resizeBox() {
-  const w = video.clientWidth;
-  const h = video.clientHeight;
-  const bw = Math.min(w * .84, h / OMR_RATIO);
-  const bh = bw * OMR_RATIO;
-  box.style.width = bw + "px";
-  box.style.height = bh + "px";
-  box.style.left = (w - bw) / 2 + "px";
-  box.style.top = (h - bh) / 2 + "px";
+statusText.innerText="Camera permission required";
+
 }
 
-async function detect() {
-  if (detectBusy || !video.videoWidth) return;
-  detectBusy = true;
-
-  canvas.width = 640;
-  canvas.height = 480;
-  canvas.getContext("2d").drawImage(video, 0, 0, 640, 480);
-
-  const r = await fetch("/detect", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img: canvas.toDataURL("image/jpeg", .7) })
-  });
-
-  if (r.ok) {
-    const d = await r.json();
-    box.classList.toggle("detected", d.detected);
-    captureBtn.disabled = !d.can_capture;
-    editBtn.disabled = !d.can_capture;
-    statusText.innerText = d.detected ? "Detected ✓" : "Searching…";
-  }
-  detectBusy = false;
 }
 
-function grab() {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
-  return canvas.toDataURL("image/jpeg", .9);
+function capture(){
+
+const ctx=canvas.getContext("2d");
+
+canvas.width=video.videoWidth;
+canvas.height=video.videoHeight;
+
+ctx.drawImage(video,0,0);
+
+const data=canvas.toDataURL("image/jpeg",0.9);
+
+fetch("/process",{
+method:"POST",
+headers:{ "Content-Type":"application/json" },
+body:JSON.stringify({img:data})
+})
+.then(r=>r.json())
+.then(d=>{
+
+document.getElementById("capturedResult").src=d.captured_image
+document.getElementById("pipelineResult").src=d.pipeline_image
+document.getElementById("biggestRectResult").src=d.biggest_rect_image
+document.getElementById("croppedResult").src=d.cropped_image
+
+document.getElementById("outputSection").classList.remove("hidden")
+
+})
+
 }
 
-captureBtn.onclick = () => send(grab());
-forceBtn.onclick = () => send(grab());
-editBtn.onclick = () => openEditor(grab());
+startCamera()
 
-function send(img) {
-  fetch("/process", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img })
-  })
-  .then(r => r.json())
-  .then(d => {
-    imgs[0].src = d.captured_image;
-    imgs[1].src = d.pipeline_image;
-    imgs[2].src = d.biggest_rect_image;
-    imgs[3].src = d.cropped_image;
-    output.classList.add("show");
-  });
-}
-
-function openEditor(img) {
-  fetch("/prepare", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img })
-  })
-  .then(r => r.json())
-  .then(d => {
-    editorImg.onload = () => {
-      const s = Math.min(520 / editorImg.width, 1);
-      editorCanvas.width = editorImg.width * s;
-      editorCanvas.height = editorImg.height * s;
-      sx = editorImg.width / editorCanvas.width;
-      sy = editorImg.height / editorCanvas.height;
-      points = d.quad_full.map(p => ({ x: p[0]/sx, y: p[1]/sy }));
-      editorModal.style.display = "flex";
-      drawEditor();
-    };
-    editorImg.src = img;
-  });
-}
-
-function drawEditor() {
-  ectx.clearRect(0,0,editorCanvas.width,editorCanvas.height);
-  ectx.drawImage(editorImg,0,0,editorCanvas.width,editorCanvas.height);
-  ectx.strokeStyle="#0f6";
-  ectx.beginPath();
-  points.forEach((p,i)=>i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y));
-  ectx.closePath(); ectx.stroke();
-  points.forEach(p=>{
-    ectx.fillStyle="#f33";
-    ectx.beginPath();
-    ectx.arc(p.x,p.y,8,0,Math.PI*2);
-    ectx.fill();
-  });
-}
-
-editorCanvas.onpointerdown = e => {
-  const r = editorCanvas.getBoundingClientRect();
-  const x = (e.clientX-r.left)*(editorCanvas.width/r.width);
-  const y = (e.clientY-r.top)*(editorCanvas.height/r.height);
-  drag = points.findIndex(p => Math.hypot(p.x-x,p.y-y) < 20);
-};
-
-editorCanvas.onpointermove = e => {
-  if (drag < 0) return;
-  const r = editorCanvas.getBoundingClientRect();
-  points[drag] = {
-    x:(e.clientX-r.left)*(editorCanvas.width/r.width),
-    y:(e.clientY-r.top)*(editorCanvas.height/r.height)
-  };
-  drawEditor();
-};
-
-editorCanvas.onpointerup = () => drag = -1;
-
-function closeEditor(){ editorModal.style.display="none"; }
-
-function applyCrop(){
-  fetch("/process_manual",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({
-      img: editorImg.src,
-      points: points.map(p=>[p.x*sx,p.y*sy])
-    })
-  })
-  .then(r=>r.json())
-  .then(d=>{
-    imgs[3].src=d.cropped_image;
-    output.classList.add("show");
-    closeEditor();
-  });
-}
 </script>
 
 </body>
