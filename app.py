@@ -6,7 +6,16 @@ import numpy as np
 
 app = Flask(__name__)
 
-OMR_RATIO = 26.5 / 21.5
+# OMR/document aspect ratio (height / width) ~= 27cm / 21cm
+OMR_RATIO = 27.0 / 21.0
+BOX_WIDTH_RATIO = 0.84
+
+# Final crop ratios requested by user
+X_RATIO = 0.005
+Y_RATIO = 0.57
+W_RATIO = 0.99
+H_RATIO = 0.22
+
 WARP_WIDTH = 900
 WARP_HEIGHT = int(WARP_WIDTH * OMR_RATIO)
 MIN_DOC_AREA_RATIO = 0.12
@@ -49,24 +58,31 @@ def _default_quad_for_image(image: np.ndarray) -> np.ndarray:
     return np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32")
 
 
-def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    rect = _order_points(pts)
-    dst = np.array(
-        [[0, 0], [WARP_WIDTH - 1, 0], [WARP_WIDTH - 1, WARP_HEIGHT - 1], [0, WARP_HEIGHT - 1]],
-        dtype="float32",
-    )
-    matrix = cv2.getPerspectiveTransform(rect, dst)
-    return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
+def _omr_box_coords(width: int, height: int) -> tuple[int, int, int, int]:
+    max_width_by_height = int(height / OMR_RATIO)
+    box_width = min(int(width * BOX_WIDTH_RATIO), max_width_by_height)
+    box_height = int(box_width * OMR_RATIO)
+
+    x1 = max(0, (width - box_width) // 2)
+    y1 = max(0, (height - box_height) // 2)
+    x2 = min(width, x1 + box_width)
+    y2 = min(height, y1 + box_height)
+    return x1, y1, x2, y2
+
+
+def _extract_box_region(frame: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = _omr_box_coords(w, h)
+    return frame[y1:y2, x1:x2], (x1, y1, x2, y2)
 
 
 def _detect_document_quad(image: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 60, 160)
 
-    kernel = np.ones((3, 3), np.uint8)
-    edges = cv2.dilate(edges, kernel, iterations=1)
-    edges = cv2.erode(edges, kernel, iterations=1)
+    edges = cv2.Canny(blurred, 60, 160)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
@@ -88,35 +104,89 @@ def _detect_document_quad(image: np.ndarray) -> tuple[np.ndarray | None, np.ndar
     return None, gray, edges
 
 
+def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    rect = _order_points(pts)
+    dst = np.array(
+        [[0, 0], [WARP_WIDTH - 1, 0], [WARP_WIDTH - 1, WARP_HEIGHT - 1], [0, WARP_HEIGHT - 1]],
+        dtype="float32",
+    )
+    matrix = cv2.getPerspectiveTransform(rect, dst)
+    return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
+
+
+def _threshold_image(warped: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    return cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        21,
+        8,
+    )
+
+
+def _ratio_crop(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    h, w = image.shape[:2]
+    x = int(w * X_RATIO)
+    y = int(h * Y_RATIO)
+    cw = int(w * W_RATIO)
+    ch = int(h * H_RATIO)
+
+    x = max(0, min(w - 1, x))
+    y = max(0, min(h - 1, y))
+    cw = max(1, min(w - x, cw))
+    ch = max(1, min(h - y, ch))
+
+    pre_crop = image.copy()
+    cv2.rectangle(pre_crop, (x, y), (x + cw, y + ch), (0, 255, 255), 3)
+    crop = image[y : y + ch, x : x + cw]
+    return pre_crop, crop
+
+
 def _scan_pipeline(image: np.ndarray, quad: np.ndarray | None = None) -> dict:
-    detected_quad, gray, edges = _detect_document_quad(image)
-    quad_for_use = quad if quad is not None else detected_quad
+    # Auto-detection is done inside the guided OMR box region.
+    roi, (x1, y1, _, _) = _extract_box_region(image)
+    detected_quad, gray, edges = _detect_document_quad(roi)
+
+    quad_for_use = quad
+    if quad_for_use is None and detected_quad is not None:
+        quad_for_use = detected_quad.copy()
+        quad_for_use[:, 0] += x1
+        quad_for_use[:, 1] += y1
     if quad_for_use is None:
         quad_for_use = _default_quad_for_image(image)
 
     warped = four_point_transform(image, quad_for_use)
 
-    overlay = image.copy()
-    if detected_quad is not None:
-        cv2.polylines(overlay, [detected_quad.astype(np.int32)], True, (0, 255, 0), 3)
+    thresholded = _threshold_image(warped)
+    pre_crop, final_crop = _ratio_crop(warped)
 
     gray_vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     edges_vis = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+    threshold_vis = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
 
-    captured_url = _encode_image_data_url(overlay)
-    pipeline_url = _encode_image_data_url(edges_vis)
-    biggest_rect_url = _encode_image_data_url(gray_vis)
-    cropped_url = _encode_image_data_url(warped)
+    captured_url = _encode_image_data_url(gray_vis)
+    pipeline_url = _encode_image_data_url(threshold_vis)
+    biggest_rect_url = _encode_image_data_url(pre_crop)
+    cropped_url = _encode_image_data_url(final_crop)
     if not captured_url or not pipeline_url or not biggest_rect_url or not cropped_url:
         raise ValueError("encode failed")
 
+    quad_full = None
+    if detected_quad is not None:
+        quad_full = detected_quad.copy()
+        quad_full[:, 0] += x1
+        quad_full[:, 1] += y1
+
     return {
         "detected": detected_quad is not None,
-        "quad": detected_quad.tolist() if detected_quad is not None else None,
+        "quad": quad_full.tolist() if quad_full is not None else None,
         "captured_image": captured_url,
         "pipeline_image": pipeline_url,
         "biggest_rect_image": biggest_rect_url,
         "cropped_image": cropped_url,
+        "debug_edges": _encode_image_data_url(edges_vis),
     }
 
 
@@ -136,9 +206,10 @@ def detect():
     if image is None:
         return jsonify({"detected": False, "stable": False, "can_capture": False})
 
-    quad, _, _ = _detect_document_quad(image)
+    roi, _ = _extract_box_region(image)
+    quad, _, _ = _detect_document_quad(roi)
     detected = quad is not None
-    return jsonify({"detected": detected, "stable": detected, "can_capture": True})
+    return jsonify({"detected": detected, "stable": detected, "can_capture": detected})
 
 
 @app.route("/process", methods=["POST"])
@@ -172,11 +243,16 @@ def prepare():
     if image is None:
         return "decode failed", 400
 
-    quad, _, _ = _detect_document_quad(image)
+    roi, (x1, y1, _, _) = _extract_box_region(image)
+    quad, _, _ = _detect_document_quad(roi)
     if quad is None:
-        quad = _default_quad_for_image(image)
+        quad_full = _default_quad_for_image(image)
+    else:
+        quad_full = quad.copy()
+        quad_full[:, 0] += x1
+        quad_full[:, 1] += y1
 
-    return jsonify({"quad_full": quad.tolist()})
+    return jsonify({"quad_full": quad_full.tolist()})
 
 
 @app.route("/process_manual", methods=["POST"])
@@ -210,7 +286,6 @@ def process_manual():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
 
 
 
@@ -687,5 +762,6 @@ if __name__ == "__main__":
 
 # if __name__ == "__main__":
 #     app.run(host="0.0.0.0", port=10000)
+
 
 
