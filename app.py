@@ -1,4 +1,4 @@
-rom flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request
 import base64
 
 import cv2
@@ -687,4 +687,5 @@ if __name__ == "__main__":
 
 # if __name__ == "__main__":
 #     app.run(host="0.0.0.0", port=10000)
+
 
