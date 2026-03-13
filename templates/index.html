@@ -1,145 +1,143 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>OMR Capture</title>
 
 <style>
-:root{
- --w:340px;
- --red:#ff2d2d;
- --green:#1fbf4c;
- --muted:#555;
-}
+:root{--w:340px;--red:#ff2d2d;--green:#1fbf4c;--muted:#555;}
 
 body{
- font-family:Arial,sans-serif;
- margin:20px;
+font-family:Arial,sans-serif;
+margin:20px;
 }
 
 #wrap{
- position:relative;
- width:var(--w);
- max-width:100%;
+position:relative;
+width:var(--w);
+max-width:100%;
 }
 
 #video{
- width:100%;
- display:block;
- border-radius:8px;
- background:#000;
+width:100%;
+display:block;
+border-radius:8px;
+background:#000;
 }
 
 #box{
- position:absolute;
- border:3px solid var(--red);
- border-radius:8px;
- pointer-events:none;
- transition:border-color .15s;
+position:absolute;
+border:3px solid var(--red);
+border-radius:8px;
+pointer-events:none;
+transition:border-color 140ms ease;
 }
 
 #box.detected{
- border-color:var(--green);
+border-color:var(--green);
 }
 
 #status{
- margin-top:8px;
- min-height:22px;
- color:var(--muted);
- font-size:18px;
+margin-top:8px;
+min-height:22px;
+color:var(--muted);
+font-size:18px;
 }
 
 #controls{
- margin-top:10px;
- display:flex;
- gap:8px;
- flex-wrap:wrap;
+margin-top:10px;
+display:flex;
+gap:8px;
+flex-wrap:wrap;
 }
 
 button{
- padding:8px 12px;
- border:1px solid #ccc;
- background:#fff;
- border-radius:6px;
- cursor:pointer;
+padding:8px 12px;
+border:1px solid #ccc;
+background:#fff;
+border-radius:6px;
+cursor:pointer;
 }
 
 #captureBtn:disabled,
-#captureEditBtn:disabled{
- opacity:.5;
- cursor:not-allowed;
+#captureEditBtn:disabled,
+#adjustCropBtn:disabled{
+opacity:0.5;
+cursor:not-allowed;
 }
 
 .output-grid.hidden{
- display:none;
+display:none;
 }
 
 .output-grid{
- display:grid;
- grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
- gap:12px;
- margin-top:14px;
- max-width:1000px;
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+gap:12px;
+margin-top:14px;
+max-width:1000px;
 }
 
 .output-card{
- font-size:14px;
- color:#333;
+font-size:14px;
+color:#333;
 }
 
 .output-card img{
- width:100%;
- max-width:var(--w);
- border:1px solid #ddd;
- border-radius:6px;
- display:block;
- margin-top:6px;
- background:#f7f7f7;
- min-height:120px;
- object-fit:contain;
+width:100%;
+max-width:var(--w);
+border:1px solid #ddd;
+border-radius:6px;
+display:block;
+margin-top:6px;
+background:#f7f7f7;
+min-height:120px;
+object-fit:contain;
 }
 
-#editorModal.hidden{
- display:none;
+.modal.hidden{
+display:none;
 }
 
-#editorModal{
- position:fixed;
- inset:0;
- background:rgba(0,0,0,.7);
- z-index:999;
- display:flex;
- align-items:center;
- justify-content:center;
- padding:10px;
+.modal{
+position:fixed;
+inset:0;
+background:rgba(0,0,0,0.72);
+z-index:999;
+display:flex;
+align-items:center;
+justify-content:center;
+padding:10px;
 }
 
-#editorCard{
- background:#fff;
- border-radius:8px;
- width:min(95vw,560px);
- padding:10px;
+.card{
+background:#fff;
+border-radius:8px;
+width:min(95vw,600px);
+padding:10px;
 }
 
-#editorTitle{
- font-size:16px;
- margin-bottom:8px;
+.title{
+font-size:16px;
+margin-bottom:8px;
 }
 
-#editorCanvas{
- width:100%;
- display:block;
- border:1px solid #ddd;
- border-radius:6px;
- background:#111;
- cursor:crosshair;
+canvas.editCanvas{
+width:100%;
+display:block;
+border:1px solid #ddd;
+border-radius:6px;
+touch-action:none;
+background:#111;
+cursor:crosshair;
 }
 
-#editorActions{
- display:flex;
- gap:8px;
- margin-top:10px;
+.actions{
+display:flex;
+gap:8px;
+margin-top:10px;
 }
 </style>
 </head>
@@ -159,11 +157,21 @@ Searching for document inside red box…
 
 <div id="controls">
 <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
-<button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
-<button onclick="capture(false,true)">Capture Anyway</button>
+
+<button id="captureEditBtn" onclick="capture(true)" disabled>
+Capture + Edit
+</button>
+
+<button id="forceCaptureBtn" onclick="capture(false,true)">
+Capture Anyway
+</button>
+
+<button id="adjustCropBtn" onclick="openCropEditor()" disabled>
+Adjust Crop Box
+</button>
 
 <label for="uploadInput">Upload Image</label>
-<input id="uploadInput" type="file" accept="image/*"/>
+<input id="uploadInput" type="file" accept="image/*">
 </div>
 
 <canvas id="canvas" style="display:none"></canvas>
@@ -186,25 +194,42 @@ Searching for document inside red box…
 </div>
 
 <div class="output-card">
-4) Final Ratio Crop Output
+4) Final Cropped Image
 <img id="croppedResult">
 </div>
 
 </div>
 
-<div id="editorModal" class="hidden">
+<div id="editorModal" class="modal hidden">
+<div class="card">
 
-<div id="editorCard">
-
-<div id="editorTitle">
-Drag the 4 red dots to set corners, then tap Apply
+<div class="title">
+Adjust 4 corners then Apply
 </div>
 
-<canvas id="editorCanvas"></canvas>
+<canvas id="editorCanvas" class="editCanvas"></canvas>
 
-<div id="editorActions">
+<div class="actions">
 <button onclick="cancelEditor()">Cancel</button>
-<button onclick="applyManualCrop()">Apply</button>
+<button onclick="applyManualCorners()">Apply</button>
+</div>
+
+</div>
+</div>
+
+<div id="cropModal" class="modal hidden">
+
+<div class="card">
+
+<div class="title">
+Adjust crop box
+</div>
+
+<canvas id="cropCanvas" class="editCanvas"></canvas>
+
+<div class="actions">
+<button onclick="cancelCropEditor()">Cancel</button>
+<button onclick="confirmCropBox()">Confirm Crop</button>
 </div>
 
 </div>
@@ -215,10 +240,11 @@ Drag the 4 red dots to set corners, then tap Apply
 const video=document.getElementById("video")
 const wrap=document.getElementById("wrap")
 const box=document.getElementById("box")
-const statusText=document.getElementById("status")
 
+const statusText=document.getElementById("status")
 const captureBtn=document.getElementById("captureBtn")
 const captureEditBtn=document.getElementById("captureEditBtn")
+const adjustCropBtn=document.getElementById("adjustCropBtn")
 
 const capturedResult=document.getElementById("capturedResult")
 const pipelineResult=document.getElementById("pipelineResult")
@@ -229,14 +255,8 @@ const canvas=document.getElementById("canvas")
 const outputSection=document.getElementById("outputSection")
 const uploadInput=document.getElementById("uploadInput")
 
-const editorModal=document.getElementById("editorModal")
-const editorCanvas=document.getElementById("editorCanvas")
-const editorCtx=editorCanvas.getContext("2d")
-
-const OMR_RATIO=26.5/21.5
-const BOX_WIDTH_RATIO=.84
-
-let detectBusy=false
+const OMR_RATIO=27/21
+const BOX_WIDTH_RATIO=0.84
 
 async function startCamera(){
 
@@ -268,7 +288,11 @@ wrap.style.height=`${displayHeight}px`
 
 const maxWidthByHeight=displayHeight/OMR_RATIO
 
-const boxWidth=Math.min(displayWidth*BOX_WIDTH_RATIO,maxWidthByHeight)
+const boxWidth=Math.min(
+displayWidth*BOX_WIDTH_RATIO,
+maxWidthByHeight
+)
+
 const boxHeight=boxWidth*OMR_RATIO
 
 box.style.width=`${boxWidth}px`
@@ -279,88 +303,70 @@ box.style.top=`${(displayHeight-boxHeight)/2}px`
 
 }
 
-video.addEventListener("loadedmetadata",()=>{
-updateBoundingBox()
-setInterval(updateDetectionState,200)
-})
-
+video.addEventListener("loadedmetadata",updateBoundingBox)
 window.addEventListener("resize",updateBoundingBox)
 
-async function updateDetectionState(){
-
-if(detectBusy||!video.videoWidth)return
-
-detectBusy=true
-
-try{
+function capture(){
 
 const ctx=canvas.getContext("2d")
 
-canvas.width=640
-canvas.height=video.videoHeight*(640/video.videoWidth)
+const scale=Math.min(
+1,
+1280/video.videoWidth
+)
+
+canvas.width=video.videoWidth*scale
+canvas.height=video.videoHeight*scale
 
 ctx.drawImage(video,0,0,canvas.width,canvas.height)
 
-const data=canvas.toDataURL("image/jpeg",.7)
-
-const res=await fetch("/detect",{
-method:"POST",
-headers:{"Content-Type":"application/json"},
-body:JSON.stringify({img:data})
-})
-
-const body=await res.json()
-
-box.classList.toggle("detected",body.detected)
-
-captureBtn.disabled=!body.can_capture
-captureEditBtn.disabled=!body.can_capture
-
-}catch(e){}
-
-detectBusy=false
-
-}
-
-function capture(openEditor=false,force=false){
-
-if(!force && captureBtn.disabled)return
-
-const ctx=canvas.getContext("2d")
-
-canvas.width=1280
-canvas.height=video.videoHeight*(1280/video.videoWidth)
-
-ctx.drawImage(video,0,0,canvas.width,canvas.height)
-
-const data=canvas.toDataURL("image/jpeg",.9)
-
-processAuto(data)
-
-}
-
-function processAuto(data){
+const data=canvas.toDataURL(
+"image/jpeg",
+0.92
+)
 
 fetch("/process",{
 method:"POST",
 headers:{"Content-Type":"application/json"},
 body:JSON.stringify({img:data})
 })
+
 .then(r=>r.json())
-.then(renderOutputs)
 
-}
+.then(payload=>{
 
-function renderOutputs(payload){
-
-capturedResult.src=payload.captured_image||""
-pipelineResult.src=payload.pipeline_image||""
-biggestRectResult.src=payload.biggest_rect_image||""
-croppedResult.src=payload.cropped_image||""
+capturedResult.src=payload.captured_image
+pipelineResult.src=payload.pipeline_image
+biggestRectResult.src=payload.biggest_rect_image
+croppedResult.src=payload.cropped_image
 
 outputSection.classList.remove("hidden")
 
+})
+
+.catch(()=>{
+alert("Capture failed")
+})
+
 }
+
+uploadInput.addEventListener("change",e=>{
+
+const file=e.target.files[0]
+
+if(!file)return
+
+const reader=new FileReader()
+
+reader.onload=()=>{
+
+processAuto(reader.result)
+
+}
+
+reader.readAsDataURL(file)
+
+})
 
 startCamera()
 
@@ -368,3 +374,4 @@ startCamera()
 
 </body>
 </html>
+```
