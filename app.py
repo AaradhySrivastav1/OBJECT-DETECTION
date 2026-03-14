@@ -108,7 +108,8 @@ def _threshold_image(warped: np.ndarray) -> np.ndarray:
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 8)
 
 
-def _largest_contour_region(warped: np.ndarray, thresholded: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+def _largest_rectangle_region(warped: np.ndarray, thresholded: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    # Threshold -> contours -> biggest contour -> biggest rectangle region only.
     inv = cv2.bitwise_not(thresholded)
     contours, _ = cv2.findContours(inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -119,11 +120,12 @@ def _largest_contour_region(warped: np.ndarray, thresholded: np.ndarray) -> tupl
     largest = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(largest)
 
-    mask = np.zeros(thresholded.shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [largest], -1, 255, thickness=cv2.FILLED)
-    isolated = cv2.bitwise_and(warped, warped, mask=mask)
-    region = isolated[y : y + h, x : x + w]
+    x = max(0, min(warped.shape[1] - 1, x))
+    y = max(0, min(warped.shape[0] - 1, y))
+    w = max(1, min(warped.shape[1] - x, w))
+    h = max(1, min(warped.shape[0] - y, h))
 
+    region = warped[y : y + h, x : x + w]
     if region.size == 0:
         hh, ww = warped.shape[:2]
         return warped.copy(), (0, 0, ww, hh)
@@ -159,7 +161,7 @@ def _build_output_from_warped(warped: np.ndarray, detected: bool, quad: np.ndarr
     thresholded = _threshold_image(warped)
     threshold_vis = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
 
-    region_only, _ = _largest_contour_region(warped, thresholded)
+    region_only, biggest_rect = _largest_rectangle_region(warped, thresholded)
     crop_rect = _default_crop_rect(region_only.shape)
     final_crop = _crop_with_rect(region_only, crop_rect)
 
@@ -180,6 +182,7 @@ def _build_output_from_warped(warped: np.ndarray, detected: bool, quad: np.ndarr
         "biggest_rect_image": region_url,
         "cropped_image": cropped_url,
         "crop_source_image": source_url,
+        "biggest_rect": list(biggest_rect),
         "crop_rect": list(crop_rect),
     }
 
@@ -810,6 +813,7 @@ if __name__ == "__main__":
 
 # if __name__ == "__main__":
 #     app.run(host="0.0.0.0", port=10000)
+
 
 
 
