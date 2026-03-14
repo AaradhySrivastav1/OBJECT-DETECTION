@@ -1,146 +1,146 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OMR Capture</title>
 
 <style>
-:root{--w:340px;--red:#ff2d2d;--green:#1fbf4c;--muted:#555;}
+:root { --w:340px; --red:#ff2d2d; --green:#1fbf4c; --muted:#555; }
 
 body{
-font-family:Arial,sans-serif;
-margin:20px;
+  font-family: Arial, sans-serif;
+  margin:20px;
 }
 
 #wrap{
-position:relative;
-width:var(--w);
-max-width:100%;
+  position:relative;
+  width:var(--w);
+  max-width:100%;
 }
 
 #video{
-width:100%;
-display:block;
-border-radius:8px;
-background:#000;
+  width:100%;
+  display:block;
+  border-radius:8px;
+  background:#000;
 }
 
 #box{
-position:absolute;
-border:3px solid var(--red);
-border-radius:8px;
-pointer-events:none;
-transition:border-color 140ms ease;
+  position:absolute;
+  border:3px solid var(--red);
+  border-radius:8px;
+  pointer-events:none;
+  transition:border-color 140ms ease;
 }
 
 #box.detected{
-border-color:var(--green);
+  border-color:var(--green);
 }
 
 #status{
-margin-top:8px;
-min-height:22px;
-color:var(--muted);
-font-size:18px;
+  margin-top:8px;
+  min-height:22px;
+  color:var(--muted);
+  font-size:18px;
 }
 
 #controls{
-margin-top:10px;
-display:flex;
-gap:8px;
-flex-wrap:wrap;
+  margin-top:10px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
 }
 
 button{
-padding:8px 12px;
-border:1px solid #ccc;
-background:#fff;
-border-radius:6px;
-cursor:pointer;
+  padding:8px 12px;
+  border:1px solid #ccc;
+  background:#fff;
+  border-radius:6px;
+  cursor:pointer;
 }
 
 #captureBtn:disabled,
 #captureEditBtn:disabled,
 #adjustCropBtn:disabled{
-opacity:0.5;
-cursor:not-allowed;
+  opacity:0.5;
+  cursor:not-allowed;
 }
 
 .output-grid.hidden{
-display:none;
+  display:none;
 }
 
 .output-grid{
-display:grid;
-grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
-gap:12px;
-margin-top:14px;
-max-width:1000px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:12px;
+  margin-top:14px;
+  max-width:1000px;
 }
 
 .output-card{
-font-size:14px;
-color:#333;
+  font-size:14px;
+  color:#333;
 }
 
 .output-card img{
-width:100%;
-max-width:var(--w);
-border:1px solid #ddd;
-border-radius:6px;
-display:block;
-margin-top:6px;
-background:#f7f7f7;
-min-height:120px;
-object-fit:contain;
+  width:100%;
+  max-width:var(--w);
+  border:1px solid #ddd;
+  border-radius:6px;
+  display:block;
+  margin-top:6px;
+  background:#f7f7f7;
+  min-height:120px;
+  object-fit:contain;
 }
 
 .modal.hidden{
-display:none;
+  display:none;
 }
 
 .modal{
-position:fixed;
-inset:0;
-background:rgba(0,0,0,0.72);
-z-index:999;
-display:flex;
-align-items:center;
-justify-content:center;
-padding:10px;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.72);
+  z-index:999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px;
 }
 
 .card{
-background:#fff;
-border-radius:8px;
-width:min(95vw,600px);
-padding:10px;
+  background:#fff;
+  border-radius:8px;
+  width:min(95vw,600px);
+  padding:10px;
 }
 
 .title{
-font-size:16px;
-margin-bottom:8px;
+  font-size:16px;
+  margin-bottom:8px;
 }
 
 canvas.editCanvas{
-width:100%;
-display:block;
-border:1px solid #ddd;
-border-radius:6px;
-touch-action:none;
-background:#111;
-cursor:crosshair;
+  width:100%;
+  display:block;
+  border:1px solid #ddd;
+  border-radius:6px;
+  touch-action:none;
+  background:#111;
+  cursor:crosshair;
 }
 
 .actions{
-display:flex;
-gap:8px;
-margin-top:10px;
+  display:flex;
+  gap:8px;
+  margin-top:10px;
 }
 </style>
 </head>
+
 
 <body>
 
@@ -151,24 +151,13 @@ margin-top:10px;
 <div id="box"></div>
 </div>
 
-<div id="status">
-Searching for document inside red box…
-</div>
+<div id="status">Searching for document inside red box…</div>
 
 <div id="controls">
 <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
-
-<button id="captureEditBtn" onclick="capture(true)" disabled>
-Capture + Edit
-</button>
-
-<button id="forceCaptureBtn" onclick="capture(false,true)">
-Capture Anyway
-</button>
-
-<button id="adjustCropBtn" onclick="openCropEditor()" disabled>
-Adjust Crop Box
-</button>
+<button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
+<button id="forceCaptureBtn" onclick="capture(false,true)">Capture Anyway</button>
+<button id="adjustCropBtn" onclick="openCropEditor()" disabled>Adjust Crop Box</button>
 
 <label for="uploadInput">Upload Image</label>
 <input id="uploadInput" type="file" accept="image/*">
@@ -200,178 +189,126 @@ Adjust Crop Box
 
 </div>
 
-<div id="editorModal" class="modal hidden">
-<div class="card">
-
-<div class="title">
-Adjust 4 corners then Apply
-</div>
-
-<canvas id="editorCanvas" class="editCanvas"></canvas>
-
-<div class="actions">
-<button onclick="cancelEditor()">Cancel</button>
-<button onclick="applyManualCorners()">Apply</button>
-</div>
-
-</div>
-</div>
-
-<div id="cropModal" class="modal hidden">
-
-<div class="card">
-
-<div class="title">
-Adjust crop box
-</div>
-
-<canvas id="cropCanvas" class="editCanvas"></canvas>
-
-<div class="actions">
-<button onclick="cancelCropEditor()">Cancel</button>
-<button onclick="confirmCropBox()">Confirm Crop</button>
-</div>
-
-</div>
-</div>
 
 <script>
 
-const video=document.getElementById("video")
-const wrap=document.getElementById("wrap")
-const box=document.getElementById("box")
+const video = document.getElementById("video")
+const wrap = document.getElementById("wrap")
+const box = document.getElementById("box")
+const statusText = document.getElementById("status")
 
-const statusText=document.getElementById("status")
-const captureBtn=document.getElementById("captureBtn")
-const captureEditBtn=document.getElementById("captureEditBtn")
-const adjustCropBtn=document.getElementById("adjustCropBtn")
+const captureBtn = document.getElementById("captureBtn")
+const captureEditBtn = document.getElementById("captureEditBtn")
 
-const capturedResult=document.getElementById("capturedResult")
-const pipelineResult=document.getElementById("pipelineResult")
-const biggestRectResult=document.getElementById("biggestRectResult")
-const croppedResult=document.getElementById("croppedResult")
+const capturedResult = document.getElementById("capturedResult")
+const pipelineResult = document.getElementById("pipelineResult")
+const biggestRectResult = document.getElementById("biggestRectResult")
+const croppedResult = document.getElementById("croppedResult")
 
-const canvas=document.getElementById("canvas")
-const outputSection=document.getElementById("outputSection")
-const uploadInput=document.getElementById("uploadInput")
+const canvas = document.getElementById("canvas")
+const outputSection = document.getElementById("outputSection")
 
-const OMR_RATIO=27/21
-const BOX_WIDTH_RATIO=0.84
+const OMR_RATIO = 27/21
+const BOX_WIDTH_RATIO = 0.84
+
+
+function updateBoundingBox(){
+
+const displayWidth = video.clientWidth
+const displayHeight = video.clientHeight
+
+if(!displayWidth || !displayHeight) return
+
+wrap.style.height = displayHeight + "px"
+
+const maxWidthByHeight = displayHeight / OMR_RATIO
+
+const boxWidth = Math.min(displayWidth*BOX_WIDTH_RATIO , maxWidthByHeight)
+const boxHeight = boxWidth * OMR_RATIO
+
+box.style.width = boxWidth + "px"
+box.style.height = boxHeight + "px"
+
+box.style.left = (displayWidth-boxWidth)/2 + "px"
+box.style.top = (displayHeight-boxHeight)/2 + "px"
+
+}
+
+
 
 async function startCamera(){
 
 try{
 
-const stream=await navigator.mediaDevices.getUserMedia({
-video:{facingMode:{ideal:"environment"}},
+const stream = await navigator.mediaDevices.getUserMedia({
+video:{ facingMode:{ ideal:"environment"} },
 audio:false
 })
 
-video.srcObject=stream
+video.srcObject = stream
 
 }catch(err){
 
-statusText.textContent="Camera access failed"
+statusText.textContent="Camera permission denied"
 
 }
 
 }
 
-function updateBoundingBox(){
 
-const displayWidth=video.clientWidth
-const displayHeight=video.clientHeight
 
-if(!displayWidth||!displayHeight)return
+video.addEventListener("loadedmetadata", updateBoundingBox)
+window.addEventListener("resize", updateBoundingBox)
 
-wrap.style.height=`${displayHeight}px`
 
-const maxWidthByHeight=displayHeight/OMR_RATIO
-
-const boxWidth=Math.min(
-displayWidth*BOX_WIDTH_RATIO,
-maxWidthByHeight
-)
-
-const boxHeight=boxWidth*OMR_RATIO
-
-box.style.width=`${boxWidth}px`
-box.style.height=`${boxHeight}px`
-
-box.style.left=`${(displayWidth-boxWidth)/2}px`
-box.style.top=`${(displayHeight-boxHeight)/2}px`
-
-}
-
-video.addEventListener("loadedmetadata",updateBoundingBox)
-window.addEventListener("resize",updateBoundingBox)
 
 function capture(){
 
-const ctx=canvas.getContext("2d")
+if(!video.videoWidth) return
 
-const scale=Math.min(
-1,
-1280/video.videoWidth
-)
+const ctx = canvas.getContext("2d")
 
-canvas.width=video.videoWidth*scale
-canvas.height=video.videoHeight*scale
+const scale = Math.min(1 , 1280/video.videoWidth)
+
+canvas.width = video.videoWidth*scale
+canvas.height = video.videoHeight*scale
 
 ctx.drawImage(video,0,0,canvas.width,canvas.height)
 
-const data=canvas.toDataURL(
-"image/jpeg",
-0.92
-)
+const data = canvas.toDataURL("image/jpeg",0.9)
+
 
 fetch("/process",{
 method:"POST",
-headers:{"Content-Type":"application/json"},
+headers:{ "Content-Type":"application/json"},
 body:JSON.stringify({img:data})
 })
-
 .then(r=>r.json())
-
 .then(payload=>{
 
-capturedResult.src=payload.captured_image
-pipelineResult.src=payload.pipeline_image
-biggestRectResult.src=payload.biggest_rect_image
-croppedResult.src=payload.cropped_image
+if(payload.captured_image)
+capturedResult.src = payload.captured_image
+
+if(payload.pipeline_image)
+pipelineResult.src = payload.pipeline_image
+
+if(payload.biggest_rect_image)
+biggestRectResult.src = payload.biggest_rect_image
+
+if(payload.cropped_image)
+croppedResult.src = payload.cropped_image
 
 outputSection.classList.remove("hidden")
 
 })
 
-.catch(()=>{
-alert("Capture failed")
-})
-
 }
 
-uploadInput.addEventListener("change",e=>{
-
-const file=e.target.files[0]
-
-if(!file)return
-
-const reader=new FileReader()
-
-reader.onload=()=>{
-
-processAuto(reader.result)
-
-}
-
-reader.readAsDataURL(file)
-
-})
 
 startCamera()
 
 </script>
 
+
 </body>
 </html>
-```
