@@ -1,5 +1,11 @@
+from __future__ import annotations
+
 from flask import Flask, jsonify, render_template, request
 import base64
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 import cv2
 import numpy as np
@@ -8,23 +14,24 @@ app = Flask(__name__)
 
 OMR_RATIO = 27.0 / 21.0
 BOX_WIDTH_RATIO = 0.84
-X_RATIO = 0.005
-Y_RATIO = 0.57
-W_RATIO = 0.99
-H_RATIO = 0.22
 WARP_WIDTH = 900
 WARP_HEIGHT = int(WARP_WIDTH * OMR_RATIO)
 MIN_DOC_AREA_RATIO = 0.12
+ANSWER_ROWS = 5
+ANSWER_COLS = 4
+ANSWER_RATIO_FALLBACK = (0.06, 0.56, 0.88, 0.30)  # x, y, w, h on scanned image
 
 
 def _decode_data_url_image(data: str) -> np.ndarray | None:
     _, _, encoded = data.partition(",")
     if not encoded:
         return None
+
     try:
         img_bytes = base64.b64decode(encoded)
     except (base64.binascii.Error, ValueError):
         return None
+
     return cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
 
 
@@ -71,7 +78,7 @@ def _extract_box_region(frame: np.ndarray) -> tuple[np.ndarray, tuple[int, int, 
 def _detect_document_quad(image: np.ndarray) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 60, 160)
+    edges = cv2.Canny(blurred, 50, 150)
     edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
 
@@ -80,8 +87,7 @@ def _detect_document_quad(image: np.ndarray) -> tuple[np.ndarray | None, np.ndar
 
     min_area = MIN_DOC_AREA_RATIO * image.shape[0] * image.shape[1]
     for contour in contours[:30]:
-        area = cv2.contourArea(contour)
-        if area < min_area:
+        if cv2.contourArea(contour) < min_area:
             continue
         peri = cv2.arcLength(contour, True)
         if peri <= 0:
@@ -89,6 +95,13 @@ def _detect_document_quad(image: np.ndarray) -> tuple[np.ndarray | None, np.ndar
         approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
         if len(approx) == 4:
             return _order_points(approx.reshape(4, 2).astype("float32")), gray, edges
+
+    for contour in contours[:10]:
+        if cv2.contourArea(contour) < min_area:
+            continue
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect)
+        return _order_points(box.astype("float32")), gray, edges
 
     return None, gray, edges
 
@@ -103,46 +116,131 @@ def four_point_transform(image: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return cv2.warpPerspective(image, matrix, (WARP_WIDTH, WARP_HEIGHT))
 
 
-def _threshold_image(warped: np.ndarray) -> np.ndarray:
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 8)
+def _enhance_scanned_image(scanned: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    gray = cv2.cvtColor(scanned, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    thresholded = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        12,
+    )
+    return gray, thresholded
 
 
-def _largest_rectangle_region(warped: np.ndarray, thresholded: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:
-    # Threshold -> contours -> biggest contour -> biggest rectangle region only.
+def _run_tesseract_boxes(gray: np.ndarray) -> list[dict]:
+    if shutil.which("tesseract") is None:
+        return []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "scan.png"
+        out_base = Path(tmpdir) / "ocr"
+        cv2.imwrite(str(img_path), gray)
+        cmd = [
+            "tesseract",
+            str(img_path),
+            str(out_base),
+            "--psm",
+            "6",
+            "tsv",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            return []
+        tsv_path = out_base.with_suffix(".tsv")
+        if not tsv_path.exists():
+            return []
+
+        rows: list[dict] = []
+        for line in tsv_path.read_text(errors="ignore").splitlines()[1:]:
+            parts = line.split("\t")
+            if len(parts) < 12:
+                continue
+            text = parts[11].strip()
+            if not text:
+                continue
+            try:
+                conf = float(parts[10])
+                left = int(parts[6])
+                top = int(parts[7])
+                width = int(parts[8])
+                height = int(parts[9])
+            except ValueError:
+                continue
+            rows.append({
+                "text": text.lower(),
+                "conf": conf,
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+            })
+        return rows
+
+
+def _fallback_answer_rect(width: int, height: int) -> tuple[int, int, int, int]:
+    x_ratio, y_ratio, w_ratio, h_ratio = ANSWER_RATIO_FALLBACK
+    x = int(width * x_ratio)
+    y = int(height * y_ratio)
+    w = int(width * w_ratio)
+    h = int(height * h_ratio)
+    x = max(0, min(width - 1, x))
+    y = max(0, min(height - 1, y))
+    w = max(1, min(width - x, w))
+    h = max(1, min(height - y, h))
+    return x, y, w, h
+
+
+def _detect_answer_rect(scanned: np.ndarray, thresholded: np.ndarray) -> tuple[int, int, int, int]:
+    h, w = scanned.shape[:2]
+
+    # OCR anchor: if "answer" is found, start the crop below it.
+    gray = cv2.cvtColor(scanned, cv2.COLOR_BGR2GRAY)
+    ocr_boxes = _run_tesseract_boxes(gray)
+    for box in ocr_boxes:
+        if "answer" in box["text"] and box["conf"] >= 20:
+            top = min(h - 1, box["top"] + box["height"] + int(0.02 * h))
+            rect = _fallback_answer_rect(w, h)
+            return rect[0], max(top, rect[1]), rect[2], min(h - max(top, rect[1]), rect[3])
+
     inv = cv2.bitwise_not(thresholded)
-    contours, _ = cv2.findContours(inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    kernel = np.ones((3, 3), np.uint8)
+    cleaned = cv2.morphologyEx(inv, cv2.MORPH_OPEN, kernel, iterations=1)
+    contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if not contours:
-        h, w = warped.shape[:2]
-        return warped.copy(), (0, 0, w, h)
+    candidates: list[tuple[int, int, int, int]] = []
+    image_area = h * w
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < image_area * 0.00003 or area > image_area * 0.015:
+            continue
+        x, y, cw, ch = cv2.boundingRect(contour)
+        if y < int(h * 0.38):
+            continue
+        if cw < 4 or ch < 4:
+            continue
+        aspect = cw / max(ch, 1)
+        if not 0.35 <= aspect <= 3.0:
+            continue
+        candidates.append((x, y, cw, ch))
 
-    largest = max(contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(largest)
+    if len(candidates) >= 8:
+        xs = [c[0] for c in candidates]
+        ys = [c[1] for c in candidates]
+        x2s = [c[0] + c[2] for c in candidates]
+        y2s = [c[1] + c[3] for c in candidates]
+        pad_x = int(0.03 * w)
+        pad_y = int(0.03 * h)
+        x = max(0, min(xs) - pad_x)
+        y = max(0, min(ys) - pad_y)
+        x2 = min(w, max(x2s) + pad_x)
+        y2 = min(h, max(y2s) + pad_y)
+        if x2 - x > int(w * 0.25) and y2 - y > int(h * 0.10):
+            return x, y, x2 - x, y2 - y
 
-    x = max(0, min(warped.shape[1] - 1, x))
-    y = max(0, min(warped.shape[0] - 1, y))
-    w = max(1, min(warped.shape[1] - x, w))
-    h = max(1, min(warped.shape[0] - y, h))
-
-    region = warped[y : y + h, x : x + w]
-    if region.size == 0:
-        hh, ww = warped.shape[:2]
-        return warped.copy(), (0, 0, ww, hh)
-    return region, (x, y, w, h)
-
-
-def _default_crop_rect(shape: tuple[int, int]) -> tuple[int, int, int, int]:
-    h, w = shape[:2]
-    x = int(w * X_RATIO)
-    y = int(h * Y_RATIO)
-    cw = int(w * W_RATIO)
-    ch = int(h * H_RATIO)
-    x = max(0, min(w - 1, x))
-    y = max(0, min(h - 1, y))
-    cw = max(1, min(w - x, cw))
-    ch = max(1, min(h - y, ch))
-    return x, y, cw, ch
+    return _fallback_answer_rect(w, h)
 
 
 def _crop_with_rect(image: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
@@ -155,35 +253,33 @@ def _crop_with_rect(image: np.ndarray, rect: tuple[int, int, int, int]) -> np.nd
     return image[y : y + h, x : x + w]
 
 
-def _build_output_from_warped(warped: np.ndarray, detected: bool, quad: np.ndarray | None) -> dict:
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    gray_vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-    thresholded = _threshold_image(warped)
-    threshold_vis = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
+def _build_output_from_scanned(scanned: np.ndarray, detected: bool, quad: np.ndarray | None) -> dict:
+    gray, thresholded = _enhance_scanned_image(scanned)
+    answer_rect = _detect_answer_rect(scanned, thresholded)
 
-    region_only, biggest_rect = _largest_rectangle_region(warped, thresholded)
-    crop_rect = _default_crop_rect(region_only.shape)
-    final_crop = _crop_with_rect(region_only, crop_rect)
+    preview = scanned.copy()
+    x, y, w, h = answer_rect
+    cv2.rectangle(preview, (x, y), (x + w, y + h), (0, 255, 255), 3)
+    final_crop = _crop_with_rect(scanned, answer_rect)
 
-    captured_url = _encode_image_data_url(gray_vis)
-    threshold_url = _encode_image_data_url(threshold_vis)
-    region_url = _encode_image_data_url(region_only)
+    grayscale_url = _encode_image_data_url(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
+    threshold_url = _encode_image_data_url(cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR))
+    preview_url = _encode_image_data_url(preview)
     cropped_url = _encode_image_data_url(final_crop)
-    source_url = _encode_image_data_url(region_only)
-
-    if not captured_url or not threshold_url or not region_url or not cropped_url or not source_url:
+    source_url = _encode_image_data_url(scanned)
+    if not grayscale_url or not threshold_url or not preview_url or not cropped_url or not source_url:
         raise ValueError("encode failed")
 
     return {
         "detected": detected,
         "quad": quad.tolist() if quad is not None else None,
-        "captured_image": captured_url,
+        "captured_image": grayscale_url,
         "pipeline_image": threshold_url,
-        "biggest_rect_image": region_url,
+        "biggest_rect_image": preview_url,
         "cropped_image": cropped_url,
         "crop_source_image": source_url,
-        "biggest_rect": list(biggest_rect),
-        "crop_rect": list(crop_rect),
+        "crop_rect": [x, y, w, h],
+        "ocr_enabled": shutil.which("tesseract") is not None,
     }
 
 
@@ -193,16 +289,18 @@ def _scan_pipeline(image: np.ndarray, quad: np.ndarray | None = None) -> dict:
 
     if quad is not None:
         quad_full = quad
+        detected = True
     elif detected_quad_roi is not None:
         quad_full = detected_quad_roi.copy()
         quad_full[:, 0] += x1
         quad_full[:, 1] += y1
+        detected = True
     else:
         quad_full = _default_quad_for_image(image)
+        detected = False
 
-    warped = four_point_transform(image, quad_full)
-    detected = detected_quad_roi is not None if quad is None else True
-    return _build_output_from_warped(warped, detected, quad_full if detected else None)
+    scanned = four_point_transform(image, quad_full)
+    return _build_output_from_scanned(scanned, detected, quad_full if detected else None)
 
 
 @app.route("/")
@@ -318,27 +416,20 @@ def confirm_crop():
 
     final_crop = _crop_with_rect(image, (x, y, w, h))
     cropped_url = _encode_image_data_url(final_crop)
-    source_url = _encode_image_data_url(image)
-    if not cropped_url or not source_url:
+    if not cropped_url:
         return "encode failed", 400
 
-    return jsonify(
-        {
-            "captured_image": None,
-            "pipeline_image": None,
-            "biggest_rect_image": None,
-            "cropped_image": cropped_url,
-            "crop_source_image": source_url,
-            "crop_rect": [x, y, w, h],
-            "detected": True,
-            "stable": True,
-        }
-    )
+    return jsonify({
+        "cropped_image": cropped_url,
+        "crop_source_image": data,
+        "crop_rect": [x, y, w, h],
+        "detected": True,
+        "stable": True,
+    })
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
 
 # from flask import Flask, render_template, request, jsonify
 # import base64
