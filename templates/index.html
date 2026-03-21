@@ -1,314 +1,573 @@
 <!DOCTYPE html>
+<html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OMR Capture</title>
-
-<style>
-:root { --w:340px; --red:#ff2d2d; --green:#1fbf4c; --muted:#555; }
-
-body{
-  font-family: Arial, sans-serif;
-  margin:20px;
-}
-
-#wrap{
-  position:relative;
-  width:var(--w);
-  max-width:100%;
-}
-
-#video{
-  width:100%;
-  display:block;
-  border-radius:8px;
-  background:#000;
-}
-
-#box{
-  position:absolute;
-  border:3px solid var(--red);
-  border-radius:8px;
-  pointer-events:none;
-  transition:border-color 140ms ease;
-}
-
-#box.detected{
-  border-color:var(--green);
-}
-
-#status{
-  margin-top:8px;
-  min-height:22px;
-  color:var(--muted);
-  font-size:18px;
-}
-
-#controls{
-  margin-top:10px;
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-button{
-  padding:8px 12px;
-  border:1px solid #ccc;
-  background:#fff;
-  border-radius:6px;
-  cursor:pointer;
-}
-
-#captureBtn:disabled,
-#captureEditBtn:disabled,
-#adjustCropBtn:disabled{
-  opacity:0.5;
-  cursor:not-allowed;
-}
-
-.output-grid.hidden{
-  display:none;
-}
-
-.output-grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
-  gap:12px;
-  margin-top:14px;
-  max-width:1000px;
-}
-
-.output-card{
-  font-size:14px;
-  color:#333;
-}
-
-.output-card img{
-  width:100%;
-  max-width:var(--w);
-  border:1px solid #ddd;
-  border-radius:6px;
-  display:block;
-  margin-top:6px;
-  background:#f7f7f7;
-  min-height:120px;
-  object-fit:contain;
-}
-
-.modal.hidden{
-  display:none;
-}
-
-.modal{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,0.72);
-  z-index:999;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:10px;
-}
-
-.card{
-  background:#fff;
-  border-radius:8px;
-  width:min(95vw,600px);
-  padding:10px;
-}
-
-.title{
-  font-size:16px;
-  margin-bottom:8px;
-}
-
-canvas.editCanvas{
-  width:100%;
-  display:block;
-  border:1px solid #ddd;
-  border-radius:6px;
-  touch-action:none;
-  background:#111;
-  cursor:crosshair;
-}
-
-.actions{
-  display:flex;
-  gap:8px;
-  margin-top:10px;
-}
-</style>
+   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CamScanner-style OMR Capture</title>
+  <style>
+    :root {
+      --w: 340px;
+      --red: #ff2d2d;
+      --green: #18b651;
+      --muted: #555;
+    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #wrap { position: relative; width: var(--w); max-width: 100%; }
+    #video { width: 100%; display: block; border-radius: 8px; background: #000; }
+    #box {
+      position: absolute;
+      border: 3px solid var(--red);
+      border-radius: 8px;
+      pointer-events: none;
+      transition: border-color 140ms ease;
+    }
+    #box.detected { border-color: var(--green); }
+    #status { margin-top: 8px; min-height: 22px; color: var(--muted); font-size: 18px; }
+    #controls { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    button, label[for="uploadInput"] {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+    }
+    #captureBtn:disabled, #captureEditBtn:disabled, #adjustCropBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .output-grid.hidden { display: none; }
+    .output-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+      max-width: 1100px;
+    }
+    .output-card { font-size: 14px; color: #333; }
+    .output-card img {
+      width: 100%;
+      max-width: 560px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      display: block;
+      margin-top: 6px;
+      background: #f7f7f7;
+      min-height: 120px;
+      object-fit: contain;
+    }
+    .hidden { display: none; }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+    .modal.hidden { display: none; }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      width: min(95vw, 620px);
+      padding: 10px;
+    }
+    .title { font-size: 16px; margin-bottom: 8px; }
+    .editCanvas {
+      width: 100%;
+      display: block;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      touch-action: none;
+      background: #111;
+      cursor: crosshair;
+    }
+    .actions { display: flex; gap: 8px; margin-top: 10px; }
+    #uploadInput { display: none; }
+    .note { margin-top: 10px; color: #666; font-size: 14px; }
+  </style>
 </head>
 
-
 <body>
-
-<h3>Place OMR inside 27cm × 21cm frame</h3>
-
-<div id="wrap">
-<video id="video" autoplay playsinline></video>
-<div id="box"></div>
-</div>
-
-<div id="status">Searching for document inside red box…</div>
-
-<div id="controls">
-<button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
-<button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Edit</button>
-<button id="forceCaptureBtn" onclick="capture(false,true)">Capture Anyway</button>
-<button id="adjustCropBtn" onclick="openCropEditor()" disabled>Adjust Crop Box</button>
-
-<label for="uploadInput">Upload Image</label>
-<input id="uploadInput" type="file" accept="image/*">
-</div>
-
-<canvas id="canvas" style="display:none"></canvas>
-
-<div id="outputSection" class="output-grid hidden">
-
-<div class="output-card">
-1) Grayscale Image
-<img id="capturedResult">
-</div>
-
-<div class="output-card">
-2) Thresholding Image
-<img id="pipelineResult">
-</div>
-
-<div class="output-card">
-3) Final Image Before Ratio Crop
-<img id="biggestRectResult">
-</div>
-
-<div class="output-card">
-4) Final Cropped Image
-<img id="croppedResult">
-</div>
-
-</div>
-
-
-<script>
-
-const video = document.getElementById("video")
-const wrap = document.getElementById("wrap")
-const box = document.getElementById("box")
-const statusText = document.getElementById("status")
-
-const captureBtn = document.getElementById("captureBtn")
-const captureEditBtn = document.getElementById("captureEditBtn")
-
-const capturedResult = document.getElementById("capturedResult")
-const pipelineResult = document.getElementById("pipelineResult")
-const biggestRectResult = document.getElementById("biggestRectResult")
-const croppedResult = document.getElementById("croppedResult")
-
-const canvas = document.getElementById("canvas")
-const outputSection = document.getElementById("outputSection")
-
-const OMR_RATIO = 27/21
-const BOX_WIDTH_RATIO = 0.84
-
-
-function updateBoundingBox(){
-
-const displayWidth = video.clientWidth
-const displayHeight = video.clientHeight
-
-if(!displayWidth || !displayHeight) return
-
-wrap.style.height = displayHeight + "px"
-
-const maxWidthByHeight = displayHeight / OMR_RATIO
-
-const boxWidth = Math.min(displayWidth*BOX_WIDTH_RATIO , maxWidthByHeight)
-const boxHeight = boxWidth * OMR_RATIO
-
-box.style.width = boxWidth + "px"
-box.style.height = boxHeight + "px"
-
-box.style.left = (displayWidth-boxWidth)/2 + "px"
-box.style.top = (displayHeight-boxHeight)/2 + "px"
-
-}
-
-
-
-async function startCamera(){
-
-try{
-
-const stream = await navigator.mediaDevices.getUserMedia({
-video:{ facingMode:{ ideal:"environment"} },
-audio:false
-})
-
-video.srcObject = stream
-
-}catch(err){
-
-statusText.textContent="Camera permission denied"
-
-}
-
-}
-
-
-
-video.addEventListener("loadedmetadata", updateBoundingBox)
-window.addEventListener("resize", updateBoundingBox)
-
-
-
-function capture(){
-
-if(!video.videoWidth) return
-
-const ctx = canvas.getContext("2d")
-
-const scale = Math.min(1 , 1280/video.videoWidth)
-
-canvas.width = video.videoWidth*scale
-canvas.height = video.videoHeight*scale
-
-ctx.drawImage(video,0,0,canvas.width,canvas.height)
-
-const data = canvas.toDataURL("image/jpeg",0.9)
-
-
-fetch("/process",{
-method:"POST",
-headers:{ "Content-Type":"application/json"},
-body:JSON.stringify({img:data})
-})
-.then(r=>r.json())
-.then(payload=>{
-
-if(payload.captured_image)
-capturedResult.src = payload.captured_image
-
-if(payload.pipeline_image)
-pipelineResult.src = payload.pipeline_image
-
-if(payload.biggest_rect_image)
-biggestRectResult.src = payload.biggest_rect_image
-
-if(payload.cropped_image)
-croppedResult.src = payload.cropped_image
-
-outputSection.classList.remove("hidden")
-
-})
-
-}
-
-
-startCamera()
-
-</script>
-
-
+  <h3>Capture and scan your OMR sheet</h3>
+
+  <div id="wrap">
+    <video id="video" autoplay playsinline></video>
+    <div id="box"></div>
+  </div>
+
+  <div id="status">Searching for document inside red box…</div>
+  <div class="note">When the document fits inside the 27cm × 21cm guide, the border turns green. You can auto-scan, manually straighten, then adjust the answer-sheet crop before finalizing.</div>
+
+  <div id="controls">
+    <button id="captureBtn" onclick="capture(false)" disabled>Capture</button>
+    <button id="captureEditBtn" onclick="capture(true)" disabled>Capture + Manual Straighten</button>
+    <button id="forceCaptureBtn" onclick="capture(false, true)">Capture Anyway</button>
+    <button id="adjustCropBtn" onclick="openCropEditor()" disabled>Adjust Answer Crop</button>
+    <label for="uploadInput">Upload Image</label>
+    <input id="uploadInput" type="file" accept="image/*" />
+  </div>
+
+  <canvas id="canvas" class="hidden"></canvas>
+
+  <div id="outputSection" class="output-grid hidden">
+    <div class="output-card">1) Scanned Grayscale Image<img id="capturedResult" alt="Scanned grayscale image" /></div>
+    <div class="output-card">2) Thresholding Image<img id="pipelineResult" alt="Thresholding image" /></div>
+    <div class="output-card">3) Detected Answer Sheet Region Before Crop<img id="biggestRectResult" alt="Detected answer region" /></div>
+    <div class="output-card">4) Final Cropped Answer Sheet<img id="croppedResult" alt="Final cropped answer sheet" /></div>
+  </div>
+
+  <div id="editorModal" class="modal hidden">
+    <div class="card">
+      <div class="title">Adjust the 4 document corners, then Apply</div>
+      <canvas id="editorCanvas" class="editCanvas"></canvas>
+      <div class="actions">
+        <button onclick="cancelEditor()">Cancel</button>
+        <button onclick="applyManualCorners()">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cropModal" class="modal hidden">
+    <div class="card">
+      <div class="title">Adjust the answer-sheet crop box, then Confirm Crop</div>
+      <canvas id="cropCanvas" class="editCanvas"></canvas>
+      <div class="actions">
+        <button onclick="cancelCropEditor()">Cancel</button>
+        <button onclick="confirmCropBox()">Confirm Crop</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById("video");
+    const wrap = document.getElementById("wrap");
+    const box = document.getElementById("box");
+    const statusText = document.getElementById("status");
+    const captureBtn = document.getElementById("captureBtn");
+    const captureEditBtn = document.getElementById("captureEditBtn");
+    const adjustCropBtn = document.getElementById("adjustCropBtn");
+    const capturedResult = document.getElementById("capturedResult");
+    const pipelineResult = document.getElementById("pipelineResult");
+    const biggestRectResult = document.getElementById("biggestRectResult");
+    const croppedResult = document.getElementById("croppedResult");
+    const canvas = document.getElementById("canvas");
+    const outputSection = document.getElementById("outputSection");
+    const uploadInput = document.getElementById("uploadInput");
+
+    const editorModal = document.getElementById("editorModal");
+    const editorCanvas = document.getElementById("editorCanvas");
+    const editorCtx = editorCanvas.getContext("2d");
+
+    const cropModal = document.getElementById("cropModal");
+    const cropCanvas = document.getElementById("cropCanvas");
+    const cropCtx = cropCanvas.getContext("2d");
+
+    const OMR_RATIO = 27 / 21;
+    const BOX_WIDTH_RATIO = 0.84;
+    const HANDLE_RADIUS = 18;
+    const HANDLE_HIT_RADIUS = 46;
+
+    let detectBusy = false;
+    let editorImage = new Image();
+    let editorImageDataUrl = "";
+    let editorPoints = [];
+    let draggingIdx = -1;
+    let scaleX = 1;
+    let scaleY = 1;
+
+    let cropImage = new Image();
+    let cropSourceImageDataUrl = "";
+    let cropRect = { x: 0, y: 0, w: 0, h: 0 };
+    let cropScaleX = 1;
+    let cropScaleY = 1;
+    let cropDragMode = null;
+    let cropDragStart = null;
+    let cropRectAtStart = null;
+
+    function updateBoundingBox() {
+      const displayWidth = video.clientWidth;
+      const displayHeight = video.clientHeight;
+      if (!displayWidth || !displayHeight) return;
+
+      wrap.style.height = `${displayHeight}px`;
+      const maxWidthByHeight = displayHeight / OMR_RATIO;
+      const boxWidth = Math.min(displayWidth * BOX_WIDTH_RATIO, maxWidthByHeight);
+      const boxHeight = boxWidth * OMR_RATIO;
+      box.style.width = `${boxWidth}px`;
+      box.style.height = `${boxHeight}px`;
+      box.style.left = `${(displayWidth - boxWidth) / 2}px`;
+      box.style.top = `${(displayHeight - boxHeight) / 2}px`;
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        console.error("Camera start failed", err);
+        statusText.textContent = "Camera access failed. Please allow camera permission.";
+      }
+    }
+
+    video.addEventListener("loadedmetadata", () => {
+      updateBoundingBox();
+      setInterval(updateDetectionState, 180);
+    });
+    window.addEventListener("resize", updateBoundingBox);
+
+    async function updateDetectionState() {
+      if (detectBusy || !video.videoWidth || !video.videoHeight) return;
+      detectBusy = true;
+      try {
+        const ctx = canvas.getContext("2d");
+        const scale = Math.min(1, 640 / video.videoWidth);
+        canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.floor(video.videoHeight * scale));
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const data = canvas.toDataURL("image/jpeg", 0.7);
+
+        const res = await fetch("/detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ img: data }),
+        });
+        if (!res.ok) return;
+
+        const body = await res.json();
+        const detected = Boolean(body.detected);
+        const canCapture = Boolean(body.can_capture);
+        box.classList.toggle("detected", detected);
+        statusText.textContent = detected ? "Document detected inside box ✓" : "Searching for document inside red box…";
+        captureBtn.disabled = !canCapture;
+        captureEditBtn.disabled = !canCapture;
+      } catch (err) {
+        console.error("detect error", err);
+      } finally {
+        detectBusy = false;
+      }
+    }
+
+    function capture(openEditor = false, force = false) {
+      if (!force && captureBtn.disabled) return;
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      const ctx = canvas.getContext("2d");
+      const scale = Math.min(1, 1280 / video.videoWidth);
+      canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.floor(video.videoHeight * scale));
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const data = canvas.toDataURL("image/jpeg", 0.92);
+
+      if (openEditor) prepareEditor(data);
+      else processAuto(data);
+    }
+
+    function processAuto(data) {
+      fetch("/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ img: data }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error("server error");
+          return r.json();
+        })
+        .then(renderOutputs)
+        .catch((e) => {
+          alert("Capture failed. Try again.");
+          console.error(e);
+        });
+       function renderOutputs(payload) {
+      if (payload.captured_image) capturedResult.src = payload.captured_image;
+      if (payload.pipeline_image) pipelineResult.src = payload.pipeline_image;
+      if (payload.biggest_rect_image) biggestRectResult.src = payload.biggest_rect_image;
+      if (payload.cropped_image) croppedResult.src = payload.cropped_image;
+      if (payload.crop_source_image) cropSourceImageDataUrl = payload.crop_source_image;
+      if (payload.crop_rect) {
+        const r = payload.crop_rect;
+        cropRect = { x: r[0] || 0, y: r[1] || 0, w: r[2] || 0, h: r[3] || 0 };
+      }
+      adjustCropBtn.disabled = !cropSourceImageDataUrl || cropRect.w <= 0 || cropRect.h <= 0;
+      outputSection.classList.remove("hidden");
+    }
+
+    async function prepareEditor(data) {
+      try {
+        const res = await fetch("/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ img: data }),
+        });
+        if (!res.ok) throw new Error("prepare failed");
+        const body = await res.json();
+        const quad = body.quad_full || [];
+        if (quad.length !== 4) throw new Error("invalid prepare response");
+
+        editorImageDataUrl = data;
+        editorImage = new Image();
+        editorImage.onload = () => {
+          const maxW = Math.max(280, Math.min(window.innerWidth - 40, 560));
+          const scale = maxW / editorImage.width;
+          editorCanvas.width = Math.round(editorImage.width * scale);
+          editorCanvas.height = Math.round(editorImage.height * scale);
+          scaleX = editorImage.width / editorCanvas.width;
+          scaleY = editorImage.height / editorCanvas.height;
+          editorPoints = quad.map((p) => ({ x: p[0] / scaleX, y: p[1] / scaleY }));
+          editorModal.classList.remove("hidden");
+          drawEditor();
+        };
+        editorImage.src = editorImageDataUrl;
+      } catch (e) {
+        alert("Manual editor failed to open.");
+        console.error(e);
+      }
+    }
+
+    function drawEditor() {
+      editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+      editorCtx.drawImage(editorImage, 0, 0, editorCanvas.width, editorCanvas.height);
+      if (editorPoints.length !== 4) return;
+
+      editorCtx.strokeStyle = "#00ff66";
+      editorCtx.lineWidth = 3;
+      editorCtx.beginPath();
+      editorCtx.moveTo(editorPoints[0].x, editorPoints[0].y);
+      for (let i = 1; i < 4; i++) editorCtx.lineTo(editorPoints[i].x, editorPoints[i].y);
+      editorCtx.closePath();
+      editorCtx.stroke();
+
+      for (let i = 0; i < 4; i++) {
+        const p = editorPoints[i];
+        editorCtx.beginPath();
+        editorCtx.arc(p.x, p.y, HANDLE_RADIUS + 3, 0, Math.PI * 2);
+        editorCtx.fillStyle = "#fff";
+        editorCtx.fill();
+        editorCtx.beginPath();
+        editorCtx.arc(p.x, p.y, HANDLE_RADIUS, 0, Math.PI * 2);
+        editorCtx.fillStyle = "#ff3b30";
+        editorCtx.fill();
+        editorCtx.fillStyle = "#fff";
+        editorCtx.font = "bold 14px Arial";
+        editorCtx.textAlign = "center";
+        editorCtx.textBaseline = "middle";
+        editorCtx.fillText(String(i + 1), p.x, p.y);
+      }
+    }
+
+    function editorPos(evt) {
+      const rect = editorCanvas.getBoundingClientRect();
+      const t = evt.touches?.[0] || evt.changedTouches?.[0] || evt;
+      const sx = rect.width ? editorCanvas.width / rect.width : 1;
+      const sy = rect.height ? editorCanvas.height / rect.height : 1;
+      return { x: (t.clientX - rect.left) * sx, y: (t.clientY - rect.top) * sy };
+    }
+
+    function pickPoint(x, y) {
+      let idx = -1;
+      let best = 1e9;
+      editorPoints.forEach((p, i) => {
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < best && d < HANDLE_HIT_RADIUS) {
+          best = d;
+          idx = i;
+        }
+      });
+      return idx;
+    }
+
+    editorCanvas.addEventListener("pointerdown", (e) => {
+      const p = editorPos(e);
+      draggingIdx = pickPoint(p.x, p.y);
+      if (draggingIdx >= 0) e.preventDefault();
+    });
+    editorCanvas.addEventListener("pointermove", (e) => {
+      if (draggingIdx < 0) return;
+      const p = editorPos(e);
+      editorPoints[draggingIdx] = {
+        x: Math.max(0, Math.min(editorCanvas.width, p.x)),
+        y: Math.max(0, Math.min(editorCanvas.height, p.y)),
+      };
+      drawEditor();
+      e.preventDefault();
+    });
+      editorCanvas.addEventListener("pointerup", () => { draggingIdx = -1; });
+    editorCanvas.addEventListener("pointercancel", () => { draggingIdx = -1; });
+
+    function cancelEditor() {
+      editorModal.classList.add("hidden");
+      draggingIdx = -1;
+    }
+
+    async function applyManualCorners() {
+      try {
+        const points = editorPoints.map((p) => [p.x * scaleX, p.y * scaleY]);
+        const res = await fetch("/process_manual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ img: editorImageDataUrl, points }),
+        });
+        if (!res.ok) throw new Error("manual process failed");
+        const payload = await res.json();
+        renderOutputs(payload);
+        cancelEditor();
+      } catch (e) {
+        alert("Manual corner apply failed.");
+        console.error(e);
+      }
+    }
+
+    function openCropEditor() {
+      if (!cropSourceImageDataUrl) return;
+      cropImage = new Image();
+      cropImage.onload = () => {
+        const maxW = Math.max(280, Math.min(window.innerWidth - 40, 600));
+        const s = maxW / cropImage.width;
+        cropCanvas.width = Math.round(cropImage.width * s);
+        cropCanvas.height = Math.round(cropImage.height * s);
+        cropScaleX = cropImage.width / cropCanvas.width;
+        cropScaleY = cropImage.height / cropCanvas.height;
+        cropModal.classList.remove("hidden");
+        drawCropEditor();
+      };
+      cropImage.src = cropSourceImageDataUrl;
+    }
+
+    function drawCropEditor() {
+      cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+      cropCtx.drawImage(cropImage, 0, 0, cropCanvas.width, cropCanvas.height);
+
+      const r = {
+        x: cropRect.x / cropScaleX,
+        y: cropRect.y / cropScaleY,
+        w: cropRect.w / cropScaleX,
+        h: cropRect.h / cropScaleY,
+      };
+      cropCtx.strokeStyle = "#00ff66";
+      cropCtx.lineWidth = 3;
+      cropCtx.strokeRect(r.x, r.y, r.w, r.h);
+
+      const handles = [
+        [r.x, r.y],
+        [r.x + r.w, r.y],
+        [r.x + r.w, r.y + r.h],
+        [r.x, r.y + r.h],
+      ];
+      handles.forEach(([x, y]) => {
+        cropCtx.beginPath();
+        cropCtx.arc(x, y, 10, 0, Math.PI * 2);
+        cropCtx.fillStyle = "#ff3b30";
+        cropCtx.fill();
+      });
+    }
+
+    function cropCanvasPos(evt) {
+      const rect = cropCanvas.getBoundingClientRect();
+      const t = evt.touches?.[0] || evt.changedTouches?.[0] || evt;
+      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    }
+
+    function cropHitMode(p) {
+      const r = {
+        x: cropRect.x / cropScaleX,
+        y: cropRect.y / cropScaleY,
+        w: cropRect.w / cropScaleX,
+        h: cropRect.h / cropScaleY,
+      };
+      const corners = {
+        nw: [r.x, r.y],
+        ne: [r.x + r.w, r.y],
+        se: [r.x + r.w, r.y + r.h],
+        sw: [r.x, r.y + r.h],
+      };
+      for (const [name, coords] of Object.entries(corners)) {
+        if (Math.hypot(p.x - coords[0], p.y - coords[1]) < 18) return name;
+      }
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return "move";
+      return null;
+    }
+
+    cropCanvas.addEventListener("pointerdown", (e) => {
+      const p = cropCanvasPos(e);
+      const mode = cropHitMode(p);
+      if (!mode) return;
+      cropDragMode = mode;
+      cropDragStart = p;
+      cropRectAtStart = { ...cropRect };
+      e.preventDefault();
+    });
+
+    cropCanvas.addEventListener("pointermove", (e) => {
+      if (!cropDragMode) return;
+      const p = cropCanvasPos(e);
+      const dx = (p.x - cropDragStart.x) * cropScaleX;
+      const dy = (p.y - cropDragStart.y) * cropScaleY;
+      let { x, y, w, h } = cropRectAtStart;
+
+      if (cropDragMode === "move") { x += dx; y += dy; }
+      if (cropDragMode === "nw") { x += dx; y += dy; w -= dx; h -= dy; }
+      if (cropDragMode === "ne") { y += dy; w += dx; h -= dy; }
+      if (cropDragMode === "se") { w += dx; h += dy; }
+      if (cropDragMode === "sw") { x += dx; w -= dx; h += dy; }
+
+      const minSize = 30;
+      x = Math.max(0, Math.min(cropImage.width - minSize, x));
+      y = Math.max(0, Math.min(cropImage.height - minSize, y));
+      w = Math.max(minSize, Math.min(cropImage.width - x, w));
+      h = Math.max(minSize, Math.min(cropImage.height - y, h));
+      if (x + w > cropImage.width) w = cropImage.width - x;
+      if (y + h > cropImage.height) h = cropImage.height - y;
+
+      cropRect = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+      drawCropEditor();
+      e.preventDefault();
+    });
+    cropCanvas.addEventListener("pointerup", () => { cropDragMode = null; });
+    cropCanvas.addEventListener("pointercancel", () => { cropDragMode = null; });
+
+    function cancelCropEditor() {
+      cropModal.classList.add("hidden");
+      cropDragMode = null;
+    }
+
+    async function confirmCropBox() {
+      try {
+        const res = await fetch("/confirm_crop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ img: cropSourceImageDataUrl, rect: [cropRect.x, cropRect.y, cropRect.w, cropRect.h] }),
+        });
+        if (!res.ok) throw new Error("confirm crop failed");
+        const payload = await res.json();
+        renderOutputs(payload);
+        cancelCropEditor();
+      } catch (e) {
+        alert("Confirm crop failed.");
+        console.error(e);
+      }
+    }
+
+    uploadInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        if (!dataUrl.startsWith("data:image")) {
+          alert("Please upload a valid image file.");
+          return;
+        }
+        processAuto(dataUrl);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    startCamera();
+  </script>
 </body>
 </html>
+    }
